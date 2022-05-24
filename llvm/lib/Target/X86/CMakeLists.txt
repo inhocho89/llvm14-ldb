@@ -83,6 +83,7 @@ set(sources
   X86VZeroUpper.cpp
   X86WinEHState.cpp
   X86InsertWait.cpp
+  X86LatencyDebug.cpp
   )
 
 add_llvm_target(X86CodeGen ${sources}
