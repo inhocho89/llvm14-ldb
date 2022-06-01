@@ -118,6 +118,11 @@ namespace VFABI {
 void setVectorVariantNames(CallInst *CI,
                            const SmallVector<std::string, 8> &VariantMappings);
 } // End VFABI namespace
+
+// LDB
+// declare thread-local global variables for LDB
+bool insertLDBGlobals(Module &M);
+
 } // End llvm namespace
 
 #endif // LLVM_TRANSFORMS_UTILS_MODULEUTILS_H

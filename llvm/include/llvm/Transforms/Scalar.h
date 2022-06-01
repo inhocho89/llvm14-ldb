@@ -563,6 +563,9 @@ FunctionPass *createInstSimplifyLegacyPass();
 // and scatter intrinsics with scalar code when target doesn't support them.
 //
 FunctionPass *createScalarizeMaskedMemIntrinLegacyPass();
+
+// LDB - insert thread-local global variables for LDB
+ModulePass *createLDBTLSPass();
 } // End llvm namespace
 
 #endif

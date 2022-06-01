@@ -681,6 +681,9 @@ void PassManagerBuilder::populateModulePassManager(
 
   MPM.add(createAnnotation2MetadataLegacyPass());
 
+  // LDB thread-local globals
+  MPM.add(createLDBTLSPass());
+
   if (!PGOSampleUse.empty()) {
     MPM.add(createPruneEHPass());
     // In ThinLTO mode, when flattened profile is used, all the available

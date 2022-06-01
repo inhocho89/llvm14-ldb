@@ -10,15 +10,8 @@ all: hello
 hello: hello.s
 	$(LDXX) hello.s -o hello
 
-hello.s: hello.ll
-	$(LLCXX) hello.ll -o hello.s
-
-hello.ll : hello_.ll
-	$(OPTXX) -enable-new-pm=0 -load $(ROOT_PATH)/build/lib/LLVMLDB.so \
-		-LDBDeclareTls -S hello_.ll -o hello.ll
-
-hello_.ll: hello.cc
-	$(CXX) -S -emit-llvm -O3 -fno-omit-frame-pointer hello.cc -o hello_.ll
+hello.s: hello.cc
+	$(CXX) -S -O3 -mllvm -enable-ldb-tls -fno-omit-frame-pointer hello.cc -o hello.s
 
 clean:
-	rm hello.s hello_.ll hello.ll hello
+	rm hello.s hello

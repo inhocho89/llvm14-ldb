@@ -60,7 +60,6 @@ bool X86LDBStack::runOnMachineFunction(MachineFunction &MF) {
   MFI.CreateFixedObject(LDB_STACK_SIZE, -16-LDB_STACK_SIZE, false);
 
   // Cleaning stack
-  //MachineBasicBlock* bb0 = &(*MF.begin());
   MachineBasicBlock* bb0 = &MF.front();
   MachineBasicBlock* bb1 = MF.CreateMachineBasicBlock();
 
@@ -133,39 +132,6 @@ bool X86LDBStack::runOnMachineFunction(MachineFunction &MF) {
     }
   }
 
-/*
-  MachineBasicBlock* bb2 = &MF.back();
-  MachineBasicBlock::iterator i;
-
-  for (i = bb2->begin(); i != bb2->end(); i++) {
-    MachineInstr *mi = &(*i);
-
-    if (mi->getOpcode() == X86::POP64r &&
-	(mi->getOperand(0)).getReg() == X86::RBP) {
-      break;
-    }
-  }
-
-  while (true) {
-    MachineInstr *mi = &(*i);
-    if (!mi->isTerminator() || i == bb2->begin()) break;
-    i--;
-  }
-
-  // movq (%rbp), %r11
-  BuildMI(*bb2, i, DebugLoc(), TII->get(X86::MOV64rm))
-    .addReg(X86::R11)
-    .addReg(X86::RBP).addImm(1)
-    .addReg(0).addImm(0)
-    .addReg(0);
-
-  // movq %r11, %fs:__ldb_rbp@TPOFF
-  BuildMI(*bb2, i, DebugLoc(), TII->get(X86::MOV64mr))
-    .addReg(0).addImm(1)
-    .addReg(0).addSym(MF.getContext().getOrCreateSymbol("__ldb_rbp@TPOFF"))
-    .addReg(X86::FS)
-    .addReg(X86::R11);
-*/
   return true;
 }
 
