@@ -80,25 +80,28 @@ bool X86LDBStack::runOnMachineFunction(MachineFunction &MF) {
     .addReg(0).addImm(-16)
     .addReg(0).addImm(0);
 */
+  // Get a virtual register for memcpy
+  Register RegTmp1 = MRI.createVirtualRegister(&X86::GR64RegClass);
+  Register RegTmp2 = MRI.createVirtualRegister(&X86::GR64RegClass);
+
   // incq %fs:__ldb_ngen@TPOFF
   BuildMI(*bb1, bb1->end(), DebugLoc(), TII->get(X86::INC64m))
     .addReg(0).addImm(1)
     .addReg(0).addSym(MF.getContext().getOrCreateSymbol("__ldb_ngen@TPOFF"))
     .addReg(X86::FS);
 
-  //TODO: change %rax to virtual register
-  // movq %fs:__ldb_ngen@TPOFF, %r11
+  // movq %fs:__ldb_ngen@TPOFF, %rx1
   BuildMI(*bb1, bb1->end(), DebugLoc(), TII->get(X86::MOV64rm))
-    .addReg(X86::R11)
+    .addDef(RegTmp1)
     .addReg(0).addImm(1)
     .addReg(0).addSym(MF.getContext().getOrCreateSymbol("__ldb_ngen@TPOFF"))
     .addReg(X86::FS);
 
-  // movq %r11, -8(%rbp)
+  // movq %rx1, -8(%rbp)
   BuildMI(*bb1, bb1->end(), DebugLoc(), TII->get(X86::MOV64mr))
     .addReg(X86::RBP).addImm(1)
     .addReg(0).addImm(-8)
-    .addReg(0).addReg(X86::R11);
+    .addReg(0).addDef(RegTmp1);
 
   /// update ldb_rbp
   // movq %rbp, %fs:__ldb_rbp@TPOFF
@@ -115,19 +118,19 @@ bool X86LDBStack::runOnMachineFunction(MachineFunction &MF) {
       MachineInstr *mi = &(*i);
 
       if (mi->isReturn()) {
-        // movq (%rbp), %r11
+        // movq (%rbp), %rx2
         BuildMI(bb, i, DebugLoc(), TII->get(X86::MOV64rm))
-          .addReg(X86::R11)
+          .addDef(RegTmp2)
 	  .addReg(X86::RBP).addImm(1)
 	  .addReg(0).addImm(0)
 	  .addReg(0);
 
-	// movq %r11, %fs:__ldb_rbp@TPOFF
+	// movq %rx2, %fs:__ldb_rbp@TPOFF
 	BuildMI(bb, i, DebugLoc(), TII->get(X86::MOV64mr))
           .addReg(0).addImm(1)
 	  .addReg(0).addSym(MF.getContext().getOrCreateSymbol("__ldb_rbp@TPOFF"))
 	  .addReg(X86::FS)
-	  .addReg(X86::R11);
+	  .addDef(RegTmp2);
       }
     }
   }
