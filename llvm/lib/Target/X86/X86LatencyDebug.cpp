@@ -79,10 +79,10 @@ bool X86LDBStack::runOnMachineFunction(MachineFunction &MF) {
     .addReg(0).addSym(MF.getContext().getOrCreateSymbol("__ldb_ngen@TPOFF"))
     .addReg(X86::FS);
 
-  // movq %rx1, -8(%rbp)
+  // movq %rx1, 16(%rbp)
   BuildMI(*bb1, bb1->end(), DebugLoc(), TII->get(X86::MOV64mr))
     .addReg(X86::RBP).addImm(1)
-    .addReg(0).addImm(-8)
+    .addReg(0).addImm(16)
     .addReg(0).addDef(RegTmp1);
 
   /// update ldb_rbp

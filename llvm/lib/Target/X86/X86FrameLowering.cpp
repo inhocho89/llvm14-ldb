@@ -1552,6 +1552,11 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
     if (TRI->hasStackRealignment(MF) && !IsWin64Prologue)
       NumBytes = alignTo(NumBytes, MaxAlign);
 
+    // LDB: Update RSP
+    BuildMI(MBB, MBBI, DL, TII.get(X86::SUB64ri8), X86::RSP)
+	    .addUse(X86::RSP)
+	    .addImm(16);
+
     // Save EBP/RBP into the appropriate stack slot.
     BuildMI(MBB, MBBI, DL, TII.get(Is64Bit ? X86::PUSH64r : X86::PUSH32r))
       .addReg(MachineFramePtr, RegState::Kill)
@@ -1562,12 +1567,12 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
       // Define the current CFA rule to use the provided offset.
       assert(StackSize);
       BuildCFI(MBB, MBBI, DL,
-               MCCFIInstruction::cfiDefCfaOffset(nullptr, -2 * stackGrowth));
+               MCCFIInstruction::cfiDefCfaOffset(nullptr, -4 * stackGrowth));
 
       // Change the rule for the FramePtr to be an "offset" rule.
       unsigned DwarfFramePtr = TRI->getDwarfRegNum(MachineFramePtr, true);
       BuildCFI(MBB, MBBI, DL, MCCFIInstruction::createOffset(
-                                  nullptr, DwarfFramePtr, 2 * stackGrowth));
+                                  nullptr, DwarfFramePtr, 4 * stackGrowth));
     }
 
     if (NeedsWinCFI) {
@@ -1648,10 +1653,6 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
       }
     }
 
-    // LDB: Update RSP
-    BuildMI(MBB, MBBI, DL, TII.get(X86::SUB64ri8), X86::RSP)
-	    .addUse(X86::RSP)
-	    .addImm(16);
   } else {
     assert(!IsFunclet && "funclets without FPs not yet implemented");
     NumBytes = StackSize -
@@ -1675,7 +1676,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
 
   // Skip the callee-saved push instructions.
   bool PushedRegs = false;
-  int StackOffset = 2 * stackGrowth;
+  int StackOffset = 4 * stackGrowth;
 
   while (MBBI != MBB.end() &&
          MBBI->getFlag(MachineInstr::FrameSetup) &&
@@ -2136,15 +2137,15 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
       emitSPUpdate(MBB, MBBI, DL, Offset, /*InEpilogue*/true);
     }
 
-    // LDB: Recover RSP
-    BuildMI(MBB, MBBI, DL, TII.get(X86::ADD64ri8), X86::RSP)
-	    .addUse(X86::RSP)
-	    .addImm(16);
-
     // Pop EBP.
     BuildMI(MBB, MBBI, DL, TII.get(Is64Bit ? X86::POP64r : X86::POP32r),
             MachineFramePtr)
         .setMIFlag(MachineInstr::FrameDestroy);
+
+    // LDB: Recover RSP
+    BuildMI(MBB, MBBI, DL, TII.get(X86::ADD64ri8), X86::RSP)
+	    .addUse(X86::RSP)
+	    .addImm(16);
 
     // We need to reset FP to its untagged state on return. Bit 60 is currently
     // used to show the presence of an extended frame.
@@ -2320,9 +2321,6 @@ StackOffset X86FrameLowering::getFrameIndexReference(const MachineFunction &MF,
   uint64_t StackSize = MFI.getStackSize();
   bool IsWin64Prologue = MF.getTarget().getMCAsmInfo()->usesWindowsCFI();
   int64_t FPDelta = 0;
-
-  // LDB: Adjustment for local variables. Offset is based on RBP
-  Offset -= 16;
 
   // In an x86 interrupt, remove the offset we added to account for the return
   // address from any stack object allocated in the caller's frame. Interrupts
