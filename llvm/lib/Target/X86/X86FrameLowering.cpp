@@ -1566,11 +1566,13 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
       // Mark the place where EBP/RBP was saved.
       // Define the current CFA rule to use the provided offset.
       assert(StackSize);
+      // LDB: 2 more stackGrowth
       BuildCFI(MBB, MBBI, DL,
                MCCFIInstruction::cfiDefCfaOffset(nullptr, -4 * stackGrowth));
 
       // Change the rule for the FramePtr to be an "offset" rule.
       unsigned DwarfFramePtr = TRI->getDwarfRegNum(MachineFramePtr, true);
+      // LDB: 2 more stackGrowth
       BuildCFI(MBB, MBBI, DL, MCCFIInstruction::createOffset(
                                   nullptr, DwarfFramePtr, 4 * stackGrowth));
     }
@@ -1676,6 +1678,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
 
   // Skip the callee-saved push instructions.
   bool PushedRegs = false;
+  // LDB: 2 more stackGrowth
   int StackOffset = 4 * stackGrowth;
 
   while (MBBI != MBB.end() &&
@@ -2146,6 +2149,7 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
     BuildMI(MBB, MBBI, DL, TII.get(X86::ADD64ri8), X86::RSP)
 	    .addUse(X86::RSP)
 	    .addImm(16);
+    --MBBI;
 
     // We need to reset FP to its untagged state on return. Bit 60 is currently
     // used to show the presence of an extended frame.
