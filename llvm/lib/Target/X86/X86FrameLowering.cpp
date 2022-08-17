@@ -42,10 +42,11 @@ STATISTIC(NumFrameExtraProbe,
 
 using namespace llvm;
 
+// LDB: LAO modified
 X86FrameLowering::X86FrameLowering(const X86Subtarget &STI,
                                    MaybeAlign StackAlignOverride)
     : TargetFrameLowering(StackGrowsDown, StackAlignOverride.valueOrOne(),
-                          STI.is64Bit() ? -8 : -4),
+                          STI.is64Bit() ? -24 : -12),
       STI(STI), TII(*STI.getInstrInfo()), TRI(STI.getRegisterInfo()) {
   // Cache a bunch of frame-related predicates for this subtarget.
   SlotSize = TRI->getSlotSize();
@@ -1646,6 +1647,11 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
         }
       }
     }
+
+    // LDB: Update RSP
+    BuildMI(MBB, MBBI, DL, TII.get(X86::SUB64ri8), X86::RSP)
+	    .addUse(X86::RSP)
+	    .addImm(16);
   } else {
     assert(!IsFunclet && "funclets without FPs not yet implemented");
     NumBytes = StackSize -
@@ -2129,6 +2135,12 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
       int Offset = 16 + mergeSPUpdates(MBB, MBBI, true);
       emitSPUpdate(MBB, MBBI, DL, Offset, /*InEpilogue*/true);
     }
+
+    // LDB: Recover RSP
+    BuildMI(MBB, MBBI, DL, TII.get(X86::ADD64ri8), X86::RSP)
+	    .addUse(X86::RSP)
+	    .addImm(16);
+
     // Pop EBP.
     BuildMI(MBB, MBBI, DL, TII.get(Is64Bit ? X86::POP64r : X86::POP32r),
             MachineFramePtr)
@@ -2308,6 +2320,9 @@ StackOffset X86FrameLowering::getFrameIndexReference(const MachineFunction &MF,
   uint64_t StackSize = MFI.getStackSize();
   bool IsWin64Prologue = MF.getTarget().getMCAsmInfo()->usesWindowsCFI();
   int64_t FPDelta = 0;
+
+  // LDB: Adjustment for local variables. Offset is based on RBP
+  Offset -= 16;
 
   // In an x86 interrupt, remove the offset we added to account for the return
   // address from any stack object allocated in the caller's frame. Interrupts

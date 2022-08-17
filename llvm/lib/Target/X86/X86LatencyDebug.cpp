@@ -56,30 +56,12 @@ bool X86LDBStack::runOnMachineFunction(MachineFunction &MF) {
     return false;
   }
 
-//  MFI.CreateFixedSpillStackObject(LDB_STACK_SIZE, -16-LDB_STACK_SIZE);
-  MFI.CreateFixedObject(LDB_STACK_SIZE, -16-LDB_STACK_SIZE, false);
-
-  // Cleaning stack
   MachineBasicBlock* bb0 = &MF.front();
   MachineBasicBlock* bb1 = MF.CreateMachineBasicBlock();
 
   MF.push_front(bb1);
   bb1->addSuccessor(bb0);
 
-  // initialize reserved space
-/*
-  // movq $0, -8(%rbp)
-  BuildMI(*bb1, bb1->end(), DebugLoc(), TII->get(X86::MOV64mi32))
-    .addReg(X86::RBP).addImm(0)
-    .addReg(0).addImm(-8)
-    .addReg(0).addImm(0);
-
-  // movq $0, -16(%rbp)
-  BuildMI(*bb1, bb1->end(), DebugLoc(), TII->get(X86::MOV64mi32))
-    .addReg(X86::RBP).addImm(0)
-    .addReg(0).addImm(-16)
-    .addReg(0).addImm(0);
-*/
   // Get a virtual register for memcpy
   Register RegTmp1 = MRI.createVirtualRegister(&X86::GR64RegClass);
   Register RegTmp2 = MRI.createVirtualRegister(&X86::GR64RegClass);
