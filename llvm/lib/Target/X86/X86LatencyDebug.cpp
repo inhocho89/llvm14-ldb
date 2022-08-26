@@ -52,6 +52,8 @@ bool X86LDBStack::runOnMachineFunction(MachineFunction &MF) {
   MachineFrameInfo &MFI = MF.getFrameInfo();
   MachineRegisterInfo &MRI = MF.getRegInfo();
 
+  return false;
+
   if (!hasFP(MF)) {
     return false;
   }
