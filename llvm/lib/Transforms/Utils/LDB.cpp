@@ -5,20 +5,15 @@
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MD5.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
-
-namespace llvm {
-  static cl::opt<bool> EnableLDBTLS("enable-ldb-tls", cl::init(false), cl::Hidden);
-}
 
 using namespace llvm;
 
 // Declare thread-local global variable for LDB
 bool llvm::insertLDBGlobals(Module &M) {
   // declare global variables only for module containing main function
-  if (!M.getFunction("main") || !llvm::EnableLDBTLS)
+  if (!M.getFunction("main"))
     return false;
 
   Type *NgenTy = Type::getInt64Ty(M.getContext());
