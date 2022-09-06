@@ -1552,7 +1552,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
     if (TRI->hasStackRealignment(MF) && !IsWin64Prologue)
       NumBytes = alignTo(NumBytes, MaxAlign);
 
-    // LDB: Update RSP
+    // LDB: Reserve stack space
     BuildMI(MBB, MBBI, DL, TII.get(X86::SUB64ri8), X86::RSP)
 	    .addUse(X86::RSP)
 	    .addImm(16);
@@ -1670,31 +1670,34 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
       MFI.setOffsetAdjustment(-StackSize);
   }
 
-  // LDB: update Thread local variable sequence
-  // incq %fs:__ldb_ngen@TPOFF
+  // LDB: Custom sequence in prologue (update ngen and rbp)
+  // 1. Increment __ldb_ngen
+  // incq %fs:-16
   BuildMI(MBB, MBBI, DL, TII.get(X86::INC64m))
     .addReg(0).addImm(1)
-    .addReg(0).addSym(MF.getContext().getOrCreateSymbol("__ldb_ngen@TPOFF"))
+    .addReg(0).addImm(-16)
     .addReg(X86::FS);
 
-  // movq %fs:__ldb_ngen@TPOFF, %r11
+  // 2. update ngen in the stack frame
+  // movq %fs:-16, %r11
   BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64rm))
     .addReg(X86::R11)
     .addReg(0).addImm(1)
-    .addReg(0).addSym(MF.getContext().getOrCreateSymbol("__ldb_ngen@TPOFF"))
+    .addReg(0).addImm(-16)
     .addReg(X86::FS);
 
   // movq %r11, 16(%rbp)
   BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mr))
     .addReg(X86::RBP).addImm(1)
     .addReg(0).addImm(16)
-    .addReg(0).addReg(X86::R11);
+    .addReg(0)
+    .addReg(X86::R11);
 
-  /// update ldb_rbp
-  // movq %rbp, %fs:__ldb_rbp@TPOFF
+  // 3. update __ldb_rbp
+  // movq %rbp, %fs:-8
   BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mr))
     .addReg(0).addImm(1)
-    .addReg(0).addSym(MF.getContext().getOrCreateSymbol("__ldb_rbp@TPOFF"))
+    .addReg(0).addImm(-8)
     .addReg(X86::FS)
     .addReg(X86::RBP);
 
@@ -2173,10 +2176,21 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
             MachineFramePtr)
         .setMIFlag(MachineInstr::FrameDestroy);
 
-    // LDB: Recover RSP
+    // LDB: custom sequence in epilogue
+    // 2. Destroy reserved space
+    // add $rsp, 16
     BuildMI(MBB, MBBI, DL, TII.get(X86::ADD64ri8), X86::RSP)
 	    .addUse(X86::RSP)
 	    .addImm(16);
+    --MBBI;
+
+    // 1. Update rbp
+    // movq %rbp, %fs:-8
+    BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mr))
+      .addReg(0).addImm(1)
+      .addReg(0).addImm(-8)
+      .addReg(X86::FS)
+      .addReg(X86::RBP);
     --MBBI;
 
     // We need to reset FP to its untagged state on return. Bit 60 is currently
@@ -2305,28 +2319,6 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
       }
     }
   }
-
-  // LDB: Recover __ngen_rbp
-  MBBI = AfterPop;
-  // skip addq 16, rsp
-  --MBBI;
-  // skip cfi
-  --MBBI;
-  // skip popq rsp
-  --MBBI;
-  // movq (%rbp), %r11
-  BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64rm))
-    .addReg(X86::R11)
-    .addReg(X86::RBP).addImm(1)
-    .addReg(0).addImm(0)
-    .addReg(0);
-
-  // movq %rx2, %fs:__ldb_rbp@TPOFF
-  BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mr))
-    .addReg(0).addImm(1)
-    .addReg(0).addSym(MF.getContext().getOrCreateSymbol("__ldb_rbp@TPOFF"))
-    .addReg(X86::FS)
-    .addReg(X86::R11);
 
   // Emit DWARF info specifying the restores of the callee-saved registers.
   // For epilogue with return inside or being other block without successor,
