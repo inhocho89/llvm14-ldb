@@ -11,17 +11,18 @@ bench_orig: bench.cc
 	/usr/bin/clang++ -pthread -O3 bench.cc -o bench_orig
 #	/usr/bin/clang++ -pthread -O3 -fno-optimize-sibling-calls -fno-omit-frame-pointer bench.cc -o bench_orig
 
-bench: bench.cc
-	$(CXX) bench.cc -o bench -O3 \
+bench: bench.o
+	$(CXX) bench.o -o bench -O3 -fno-optimize-sibling-calls -fno-omit-frame-pointer \
 		-Wl,--unresolved-symbols=ignore-in-object-files
 #	$(CXX) bench.cc -o bench -O3 -fno-optimize-sibling-calls -fno-omit-frame-pointer \
 		-mllvm -enable-ldb-tls -Wl,--unresolved-symbols=ignore-in-object-files
 
-#bench: bench.s
-#	$(LDXX) -pthread bench.s -o bench
+bench.o: bench.cc
+	$(CXX) bench.cc -c -o bench.o -O3 -fno-optimize-sibling-calls -fno-omit-frame-pointer
 
 bench.s: bench.cc
-	$(CXX) bench.cc -o bench.s -S -O3 -fno-optimize-sibling-calls -fno-omit-frame-pointer
+	$(CXX) bench.cc -o bench.s -S -O3 -fno-optimize-sibling-calls -fno-omit-frame-pointer \
+		-Wl,--unresolved-symbols=ignore-in-object-files
 
 clean:
-	rm bench.s bench bench_orig
+	rm bench.s bench.o bench bench_orig
