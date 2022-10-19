@@ -3,6 +3,7 @@
 #include "llvm/Transforms/Utils/LDB.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/MD5.h"
@@ -12,10 +13,10 @@ using namespace llvm;
 
 // Declare thread-local global variable for LDB
 bool llvm::insertLDBGlobals(Module &M) {
-  // declare global variables only for module containing main function
   if (!M.getFunction("main"))
     return false;
 
+  // declare global variables only for module containing main function
   Type *NgenTy = Type::getInt64Ty(M.getContext());
   M.getOrInsertGlobal("__ldb_ngen", NgenTy, [&] {
     GlobalVariable *g =
@@ -39,6 +40,45 @@ bool llvm::insertLDBGlobals(Module &M) {
       g->setAlignment(llvm::Align(8));
       return g;
   });
+
+  // Instrument main function
+  // setup hooks
+  auto &Context = M.getContext();
+  Type* voidTy = Type::getVoidTy(Context);
+  FunctionType* funcTy = FunctionType::get(voidTy, false);
+  Function::Create(funcTy, llvm::GlobalVariable::ExternalLinkage)->setName("__ldbInit");
+  Function::Create(funcTy, llvm::GlobalVariable::ExternalLinkage)->setName("__ldbExit");
+
+  // Loop through all of the functions in the module
+  Module::FunctionListType &functions = M.getFunctionList();
+  for(Module::FunctionListType::iterator FI = functions.begin(), FE = functions.end();
+      FI != FE; ++FI) {
+    // Ignore the instrumented function
+    if (FI->getName() == "__ldbInit" || FI->getName() == "__ldbExit")
+      continue;
+
+    // Instrument main function
+    if (FI->getName() == "main") {
+      FunctionCallee hook_init = M.getOrInsertFunction("__ldbInit", funcTy);
+      FunctionCallee hook_exit = M.getOrInsertFunction("__ldbExit", funcTy);
+
+      // instrument init function
+      BasicBlock *BB = &(*FI).front();
+      Instruction *I = &BB->front();
+
+      CallInst::Create(hook_init)->insertBefore(I);
+
+      // instrument exit function
+      for (BasicBlock &bb : *FI) {
+        for (Instruction &i : bb) {
+          if (i.getOpcode() == Instruction::Ret) {
+            CallInst::Create(hook_exit)->insertBefore(&i);
+          }
+        }
+      }
+
+    }
+  }
 
   return true;
 }
