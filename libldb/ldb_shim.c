@@ -123,3 +123,29 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
         call to pthread_create*/
     return real_pthread_create(thread, attr, &__ldb_thread_start, worker_params);
 }
+
+int pthread_mutex_lock(pthread_mutex_t *mutex) {
+  char *error;
+  int (*real_pthread_mutex_lock)(pthread_mutex_t *m);
+
+  real_pthread_mutex_lock = dlsym(RTLD_NEXT, "pthread_mutex_lock");
+  if ((error = dlerror()) != NULL) {
+    fputs(error, stderr);
+    return 0;
+  }
+
+  return real_pthread_mutex_lock(mutex);
+}
+
+int rand(void) {
+  char *error;
+  int (*real_rand)(void);
+
+  real_rand = dlsym(RTLD_NEXT, "rand");
+  if ((error = dlerror()) != NULL) {
+    fputs(error, stderr);
+    return 0;
+  }
+
+  return real_rand();
+}

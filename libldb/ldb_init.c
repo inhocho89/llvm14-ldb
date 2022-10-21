@@ -131,6 +131,7 @@ void *monitor_main(void *arg) {
       pthread_t thread_id = ldb_shared->ldb_thread_info[tidx].id;
       char ***fsbase = &(ldb_shared->ldb_thread_info[tidx].fsbase);
       int lidx = 0;
+      char *prbp = NULL;
       char *rbp = *(*fsbase - 1);
       // use initial rbp as sequence lock
       char *slock = rbp;
@@ -138,10 +139,26 @@ void *monitor_main(void *arg) {
       uint64_t ngen = 99;
       char *rip;
 
+      // for some reason
+      if (rbp == (char *)0x1) {
+        continue;
+      }
+
       // traversing stack frames
       while (rbp != NULL && ngen > 1) {
+        if (rbp < prbp) {
+          lidx = 0;
+          break;
+        }
+        if (rbp == (char *)(*((uint64_t *)rbp))) {
+          lidx--;
+          break;
+        }
+
         ngen = *((uint64_t *)(rbp + 16));
         rip = (char *)(*((uint64_t *)(rbp + 24)));
+
+        //printf("[%d] rbp = %p, canary = %lu, ngen = %lu, rip = %p\n", lidx, rbp, canary, ngen, rip);
 
         temp_ngen[lidx] = ngen;
         temp_rip[lidx] = rip;
@@ -155,6 +172,7 @@ void *monitor_main(void *arg) {
         }
 
         // rbp: go up!
+        prbp = rbp;
         rbp = (char *)(*((uint64_t *)rbp));
         lidx++;
       }
