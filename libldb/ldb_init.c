@@ -145,13 +145,9 @@ void *monitor_main(void *arg) {
       }
 
       // traversing stack frames
-      while (rbp != NULL && ngen > 1) {
-        if (rbp < prbp) {
-          lidx = 0;
-          break;
-        }
-        if (rbp == (char *)(*((uint64_t *)rbp))) {
-          lidx--;
+      while (rbp != NULL && rbp > prbp) {
+        // invalid RBP
+        if (rbp >= (char *)0x800000000000) {
           break;
         }
 
@@ -212,6 +208,11 @@ void *monitor_main(void *arg) {
   } // while true
 
   return NULL;
+}
+
+void __ldbInitTls(void) {
+  asm volatile ("movq $0, %%fs:-8 \n\t" ::: "memory");
+  asm volatile ("movq $0, %%fs:-16 \n\t" ::: "memory");
 }
 
 // This is the main function instrumented
