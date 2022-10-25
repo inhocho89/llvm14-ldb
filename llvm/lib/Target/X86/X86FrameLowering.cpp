@@ -1693,7 +1693,22 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
     .addReg(0)
     .addReg(X86::R11);
 
-  // 3. update __ldb_rbp
+  // 3.LDB: Set Tag
+  // movq %fs:-24, %r11
+  BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64rm))
+    .addReg(X86::R11)
+    .addReg(0).addImm(1)
+    .addReg(0).addImm(-24)
+    .addReg(X86::FS);
+
+  // movq %r11, 8(%rbp)
+  BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mr))
+    .addReg(X86::RBP).addImm(1)
+    .addReg(0).addImm(8)
+    .addReg(0)
+    .addReg(X86::R11);
+
+  // 4. update __ldb_rbp
   // movq %rbp, %fs:-8
   BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mr))
     .addReg(0).addImm(1)

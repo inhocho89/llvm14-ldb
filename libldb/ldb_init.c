@@ -19,6 +19,7 @@ ldb_shmseg *ldb_shared;
 struct LDBEvent {
   uint64_t timestamp;
   uint32_t thread_id;
+  uint64_t tag;
   uint64_t ngen;
   uint64_t latency;
   char *rip;
@@ -34,20 +35,21 @@ static void printRecord() {
 
   for (int i = 0; i < LDB_REPORT_BUF_SIZE; ++i) {
     struct LDBEvent *event = &events[i];
-    fprintf(ldb_fout, "%lu,%u,%lu,%lf,%p\n",
-        event->timestamp, event->thread_id, event->ngen,
+    fprintf(ldb_fout, "%lu,%u,%lu,%lu,%lf,%p\n",
+        event->timestamp, event->thread_id, event->tag, event->ngen,
         1.0 * event->latency / CYCLES_PER_US, event->rip);
   }
 
   fflush(ldb_fout);
 }
 
-static void record(uint64_t timestamp_, pthread_t tid_, uint64_t ngen_,
-    uint64_t latency_, char *rip_) {
+static void record(uint64_t timestamp_, pthread_t tid_, uint64_t tag_,
+    uint64_t ngen_, uint64_t latency_, char *rip_) {
   struct LDBEvent *event = &events[nextIndex];
 
   event->timestamp = timestamp_;
   event->thread_id = (uint32_t)tid_;
+  event->tag = tag_;
   event->ngen = ngen_;
   event->latency = latency_;
   event->rip = rip_;
@@ -89,6 +91,7 @@ static inline __attribute__((always_inline)) char *get_rbp() {
 
 void *monitor_main(void *arg) {
   // stats to collect
+  uint64_t **ldb_tag;
   uint64_t **ldb_ngen;
   char ***ldb_rip;
   uint64_t **ldb_latency;
@@ -96,16 +99,19 @@ void *monitor_main(void *arg) {
   uint64_t last_tsc = rdtsc();
 
   // temporary variables
+  uint64_t temp_tag[LDB_MAX_CALLDEPTH];
   uint64_t temp_ngen[LDB_MAX_CALLDEPTH];
   char *temp_rip[LDB_MAX_CALLDEPTH];
 
   // allocate memory for bookkeeping
+  ldb_tag = (uint64_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint64_t *));
   ldb_ngen = (uint64_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint64_t *));
   ldb_rip = (char ***)malloc(LDB_MAX_NTHREAD * sizeof(char **));
   ldb_latency = (uint64_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint64_t *));
   ldb_cnt = (int *)malloc(LDB_MAX_NTHREAD * sizeof(int));
 
   for (int i = 0; i < LDB_MAX_CALLDEPTH; ++i) {
+    ldb_tag[i] = (uint64_t *)malloc(LDB_MAX_CALLDEPTH * sizeof(uint64_t));
     ldb_ngen[i] = (uint64_t *)malloc(LDB_MAX_CALLDEPTH * sizeof(uint64_t));
     ldb_rip[i] = (char **)malloc(LDB_MAX_CALLDEPTH * sizeof(char *));
     ldb_latency[i] = (uint64_t *)malloc(LDB_MAX_CALLDEPTH * sizeof(uint64_t));
@@ -136,11 +142,12 @@ void *monitor_main(void *arg) {
       // use initial rbp as sequence lock
       char *slock = rbp;
       uint64_t slock2 = *(uint64_t *)(*fsbase - 2);
-      uint64_t ngen = 99;
+      uint64_t ngen;
+      uint64_t tag;
       char *rip;
 
-      // for some reason
-      if (rbp == (char *)0x1) {
+      // check for valid RBP
+      if (rbp < (char *)0x100000000000) {
         continue;
       }
 
@@ -151,11 +158,13 @@ void *monitor_main(void *arg) {
           break;
         }
 
+        tag = *((uint64_t *)(rbp + 8));
         ngen = *((uint64_t *)(rbp + 16));
         rip = (char *)(*((uint64_t *)(rbp + 24)));
 
         //printf("[%d] rbp = %p, canary = %lu, ngen = %lu, rip = %p\n", lidx, rbp, canary, ngen, rip);
 
+        temp_tag[lidx] = tag;
         temp_ngen[lidx] = ngen;
         temp_rip[lidx] = rip;
 
@@ -190,11 +199,12 @@ void *monitor_main(void *arg) {
       // Record data collected
       for (int i = gidx; i < ldb_cnt[tidx]; ++i) {
         //printf("%lu\n", ldb_latency[tidx][i]);
-        record(now, thread_id, ldb_ngen[tidx][i], ldb_latency[tidx][i], ldb_rip[tidx][i]);
+        record(now, thread_id, ldb_tag[tidx][i], ldb_ngen[tidx][i], ldb_latency[tidx][i], ldb_rip[tidx][i]);
       }
 
       // Add new nodes
       while (lidx > 0) {
+        ldb_tag[tidx][gidx] = temp_tag[lidx - 1];
         ldb_ngen[tidx][gidx] = temp_ngen[lidx - 1];
         ldb_latency[tidx][gidx] = 0;
         ldb_rip[tidx][gidx] = temp_rip[lidx - 1];
@@ -210,14 +220,8 @@ void *monitor_main(void *arg) {
   return NULL;
 }
 
-void __ldbInitTls(void) {
-  asm volatile ("movq $0, %%fs:-8 \n\t" ::: "memory");
-  asm volatile ("movq $0, %%fs:-16 \n\t" ::: "memory");
-}
-
 // This is the main function instrumented
 void __ldbInit(void) {
-
   // attach shared memory
   key_t shm_key = ftok("ldb", 65);
   int shmid = shmget(shm_key, sizeof(ldb_shmseg), 0644|IPC_CREAT);
