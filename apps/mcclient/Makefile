@@ -1,7 +1,7 @@
 all: mcclient
 	
 mcclient: mcclient.o waitgroup.o
-	g++ mcclient.o waitgroup.o -o mcclient
+	g++ mcclient.o waitgroup.o -lpthread -o mcclient
 
 mcclient.o: mcclient.cc
 	g++ mcclient.cc -c -o mcclient.o
