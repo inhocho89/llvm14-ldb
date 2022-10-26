@@ -11,8 +11,11 @@
 
 #define CYCLES_PER_US 2992
 #define LDB_MAX_CALLDEPTH 1024
-#define LDB_REPORT_BUF_SIZE 1024
+#define LDB_REPORT_BUF_SIZE 2048
+#define LDB_REPORT_THRESH 256
 #define LDB_REPORT_OUTPUT "ldb.data"
+
+#define barrier()       asm volatile("" ::: "memory")
 
 ldb_shmseg *ldb_shared;
 
@@ -25,27 +28,27 @@ struct LDBEvent {
   char *rip;
 };
 
-FILE *ldb_fout = NULL;
-int nextIndex = 0;
+static int eventTail = 0;
+static int eventHead = 0;
+static pthread_mutex_t mEvent = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t cvEvent = PTHREAD_COND_INITIALIZER;
 static struct LDBEvent events[LDB_REPORT_BUF_SIZE];
 
-static void printRecord() {
-  if (ldb_fout == NULL)
-    ldb_fout = fopen(LDB_REPORT_OUTPUT, "w");
-
-  for (int i = 0; i < LDB_REPORT_BUF_SIZE; ++i) {
-    struct LDBEvent *event = &events[i];
-    fprintf(ldb_fout, "%lu,%u,%lu,%lu,%lf,%p\n",
-        event->timestamp, event->thread_id, event->tag, event->ngen,
-        1.0 * event->latency / CYCLES_PER_US, event->rip);
-  }
-
-  fflush(ldb_fout);
+static inline int recordSize() {
+  int i = eventTail - eventHead;
+  return (LDB_REPORT_BUF_SIZE + (i % LDB_REPORT_BUF_SIZE)) % LDB_REPORT_BUF_SIZE;
 }
 
 static void record(uint64_t timestamp_, pthread_t tid_, uint64_t tag_,
     uint64_t ngen_, uint64_t latency_, char *rip_) {
-  struct LDBEvent *event = &events[nextIndex];
+
+  // If queue becomes full, ignore datapoint.
+  if ((eventTail + 1) % LDB_REPORT_BUF_SIZE == eventHead) {
+    fprintf(stderr, "Warning: data point was ignored\n");
+    return;
+  }
+
+  struct LDBEvent *event = &events[eventTail];
 
   event->timestamp = timestamp_;
   event->thread_id = (uint32_t)tid_;
@@ -54,9 +57,12 @@ static void record(uint64_t timestamp_, pthread_t tid_, uint64_t tag_,
   event->latency = latency_;
   event->rip = rip_;
 
-  nextIndex = (nextIndex + 1) % LDB_REPORT_BUF_SIZE;
-  if (nextIndex == 0)
-    printRecord();
+  pthread_mutex_lock(&mEvent);
+  eventTail = (eventTail + 1) % LDB_REPORT_BUF_SIZE;
+  if (recordSize() > LDB_REPORT_THRESH) {
+    pthread_cond_broadcast(&cvEvent);
+  }
+  pthread_mutex_unlock(&mEvent);
 }
 
 // Helper functions
@@ -96,12 +102,15 @@ void *monitor_main(void *arg) {
   char ***ldb_rip;
   uint64_t **ldb_latency;
   int *ldb_cnt;
-  uint64_t last_tsc = rdtsc();
+  uint64_t last_tsc;
 
   // temporary variables
   uint64_t temp_tag[LDB_MAX_CALLDEPTH];
   uint64_t temp_ngen[LDB_MAX_CALLDEPTH];
   char *temp_rip[LDB_MAX_CALLDEPTH];
+
+  uint64_t now;
+  uint64_t elapsed;
 
   // allocate memory for bookkeeping
   ldb_tag = (uint64_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint64_t *));
@@ -119,15 +128,14 @@ void *monitor_main(void *arg) {
 
   memset(ldb_cnt, 0, sizeof(int) * LDB_MAX_NTHREAD);
 
-  // initialize output
-  remove(LDB_REPORT_OUTPUT);
-
   printf("Monitor starts\n");
   
   // Currently busy-running
   while (1) {
-    unsigned long now = rdtsc();
-    unsigned long elapsed = now - last_tsc;
+    barrier();
+    now = rdtsc();
+    barrier();
+    elapsed = now - last_tsc;
 
     for (int tidx = 0; tidx < ldb_shared->ldb_max_idx; ++tidx) {
       // Skip if fsbase is invalid
@@ -163,6 +171,11 @@ void *monitor_main(void *arg) {
         rip = (char *)(*((uint64_t *)(rbp + 24)));
 
         //printf("[%d] rbp = %p, canary = %lu, ngen = %lu, rip = %p\n", lidx, rbp, canary, ngen, rip);
+
+        // invalid generation number
+        if (ngen > slock2) {
+          break;
+        }
 
         temp_tag[lidx] = tag;
         temp_ngen[lidx] = ngen;
@@ -220,6 +233,32 @@ void *monitor_main(void *arg) {
   return NULL;
 }
 
+void *logger_main(void *arg) {
+  FILE *ldb_fout = fopen(LDB_REPORT_OUTPUT, "w");
+
+  while (1) {
+    while (eventHead != eventTail) {
+      struct LDBEvent *event = &events[eventHead];
+      fprintf(ldb_fout, "%lu,%u,%lu,%lu,%lu,%p\n",
+          event->timestamp, event->thread_id, event->tag, event->ngen,
+          event->latency, event->rip);
+
+      eventHead = (eventHead + 1) % LDB_REPORT_BUF_SIZE;
+    }
+
+    fflush(ldb_fout);
+
+    pthread_mutex_lock(&mEvent);
+    while (eventHead == eventTail) {
+      pthread_cond_wait(&cvEvent, &mEvent);
+    }
+    pthread_mutex_unlock(&mEvent);
+  }
+
+  fclose(ldb_fout);
+  return NULL;
+}
+
 // This is the main function instrumented
 void __ldbInit(void) {
   // attach shared memory
@@ -241,6 +280,10 @@ void __ldbInit(void) {
   // Launch monitoring thread
   pthread_t mid;
   pthread_create(&mid, NULL, &monitor_main, NULL);
+
+  // Launch logger thread
+  pthread_t lid;
+  pthread_create(&lid, NULL, &logger_main, NULL);
 }
 
 void __ldbExit(void) {

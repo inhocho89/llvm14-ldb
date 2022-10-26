@@ -124,6 +124,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     return real_pthread_create(thread, attr, &__ldb_thread_start, worker_params);
 }
 
+/* pthread-related functions */
 int pthread_mutex_lock(pthread_mutex_t *mutex) {
   char *error;
   int (*real_pthread_mutex_lock)(pthread_mutex_t *m);
@@ -136,6 +137,63 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
 
   return real_pthread_mutex_lock(mutex);
 }
+
+int pthread_spin_lock(pthread_spinlock_t *lock) {
+  char *error;
+  int (*real_pthread_spin_lock)(pthread_spinlock_t *);
+
+  real_pthread_spin_lock = dlsym(RTLD_NEXT, "pthread_spin_lock");
+  if ((error = dlerror()) != NULL) {
+    fputs(error, stderr);
+    return 0;
+  }
+
+  return real_pthread_spin_lock(lock);
+}
+/*
+int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex) {
+  char *error;
+  int (*real_pthread_cond_wait)(pthread_cond_t *, pthread_mutex_t *);
+  int ret;
+
+  real_pthread_cond_wait = dlsym(RTLD_NEXT, "pthread_cond_wait");
+  if ((error = dlerror()) != NULL) {
+    fputs(error, stderr);
+    return 0;
+  }
+
+  ret = real_pthread_cond_wait(cond, mutex);
+  return ret;
+}*/
+
+/* memory-related functions */
+void *memset(void *str, int c, size_t n) {
+  char *error;
+  void *(*real_memset)(void *, int, size_t);
+
+  real_memset = dlsym(RTLD_NEXT, "memset");
+  if ((error = dlerror()) != NULL) {
+    fputs(error, stderr);
+    return NULL;
+  }
+
+  return real_memset(str, c, n);
+}
+
+void *malloc(size_t size) {
+  char *error;
+  void *(*real_malloc)(size_t);
+
+  real_malloc = dlsym(RTLD_NEXT, "malloc");
+  if ((error = dlerror()) != NULL) {
+    fputs(error, stderr);
+    return NULL;
+  }
+
+  return real_malloc(size);
+}
+
+/* other useful functions */
 
 int rand(void) {
   char *error;
