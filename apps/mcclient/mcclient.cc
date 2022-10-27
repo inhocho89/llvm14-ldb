@@ -668,37 +668,6 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs) {
   }
 
   latency_out.close();
-  return;
-
-  std::vector<work_unit> rejected;
-
-  std::copy_if(w.begin(), w.end(), std::back_inserter(rejected), [](work_unit &s) {
-    return !s.success;
-  });
-
-  uint64_t reject_cnt = rejected.size();
-  uint64_t reject_min = 0;
-  uint64_t reject_p50 = 0;
-  double reject_mean = 0.0;
-  uint64_t reject_p99 = 0;
-
-  if (reject_cnt > 0) {
-    double sum;
-
-    std::sort(rejected.begin(), rejected.end(),
-	      [](const work_unit &s1, const work_unit &s2) {
-        return s1.duration_us < s2.duration_us;
-    });
-    sum = std::accumulate(rejected.begin(), rejected.end(), 0.0,
-			  [](double s, const work_unit &c) {
-			      return s + c.duration_us;
-			  });
-
-    reject_min = rejected[0].duration_us;
-    reject_mean = static_cast<double>(sum) / reject_cnt;
-    reject_p50 = rejected[(reject_cnt - 1) * 0.5].duration_us;
-    reject_p99 = rejected[(reject_cnt - 1) * 0.99].duration_us;
-  }
 
   w.erase(std::remove_if(w.begin(), w.end(),
 			 [](const work_unit &s) {
@@ -722,37 +691,9 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs) {
   double max = w[w.size() - 1].duration_us;
 
   std::cout << std::setprecision(4) << std::fixed << threads * total_agents << ","
-      << cs->offered_rps << "," << cs->rps << "," << cs->goodput << ","
+      << cs->offered_rps << "," << cs->rps << ","
       << min << "," << mean << "," << p50 << "," << p90 << "," << p99 << ","
-      << p999 << "," << p9999 << "," << max << ","
-      << reject_min << "," << reject_mean << "," << reject_p50 << ","
-      << reject_p99 << std::endl;
-
-  csv_out << std::setprecision(4) << std::fixed << threads * total_agents << ","
-      << cs->offered_rps << "," << cs->rps << "," << cs->goodput << ","
-      << min << "," << mean << "," << p50 << "," << p90 << "," << p99 << ","
-      << p999 << "," << p9999 << "," << max << ","
-      << reject_min << "," << reject_mean << "," << reject_p50 << ","
-      << reject_p99 << std::endl << std::flush;
-
-  json_out << "{"
-	   << "\"num_threads\":" << threads * total_agents << ","
-	   << "\"offered_load\":" << cs->offered_rps << ","
-	   << "\"throughput\":" << cs->rps << ","
-	   << "\"goodput\":" << cs->goodput << ","
-	   << "\"min\":" << min << ","
-	   << "\"mean\":" << mean << ","
-	   << "\"p50\":" << p50 << ","
-	   << "\"p90\":" << p90 << ","
-	   << "\"p99\":" << p99 << ","
-	   << "\"p999\":" << p999 << ","
-	   << "\"p9999\":" << p9999 << ","
-	   << "\"max\":" << max << ","
-	   << "\"reject_min\":" << reject_min << ","
-	   << "\"reject_mean\":" << reject_mean << ","
-	   << "\"reject_p50\":" << reject_p50 << ","
-	   << "\"reject_p99\":" << reject_p99 << ","
-	   << "}," << std::endl << std::flush;
+      << p999 << "," << p9999 << "," << max << std::endl;
 }
 
 void SteadyStateExperiment(int threads, double offered_rps) {
