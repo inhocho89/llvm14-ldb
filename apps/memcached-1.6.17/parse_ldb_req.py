@@ -12,6 +12,7 @@ import sys
 import csv
 import copy
 import math
+import os
 
 # If pyelftools is not installed, the example can also run from the root or
 # examples/ dir of the source distribution.
@@ -87,11 +88,20 @@ def decode_file_line(dwarfinfo, address):
                 prevstate = entry.state
     return None, None, None
 
-def generate_stats(executable, ldb_raw, mreq):
-
+def generate_stats(executable, mreq, ldb_raw, perf_raw):
+    latencies = {}
+    perf_decode = ""
     print('executable: {}'.format(executable))
     print('LDB data: {}'.format(ldb_raw))
-    latencies = {}
+    print('Perf data: {}'.format(perf_raw))
+    if os.path.exists(perf_raw):
+        perf_decode = "perf.dec"
+        print('  generating decoded data...')
+        if(os.system('sudo perf sched script -F time,tid,cpu,event,ip,sym > {}'.format(perf_decode)) != 0):
+            print('[Error] Decoding perf data failed. Please check the permission')
+        print('  generated {}'.format(perf_decode))
+    else:
+        print('  Cannot find perf data')
 
     with open(executable, 'rb') as e:
         # get elf and dwarf information
@@ -157,7 +167,7 @@ def generate_stats(executable, ldb_raw, mreq):
                     'col': col})
         
         def filter_req_sort(e):
-            return e['tsc']
+            return e['ngen']
 
         filter_req.sort(key=filter_req_sort)
 
@@ -194,11 +204,14 @@ def generate_stats(executable, ldb_raw, mreq):
         """
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print('Expected usage: {0} <executable> <req#> <ldb raw output=ldb.data>'.format(sys.argv[0]))
+        print('Expected usage: {0} <executable> <req#> <ldb raw output=ldb.data> <perf raw output=perf.data>'.format(sys.argv[0]))
         sys.exit(1)
     #addr = int(sys.argv[1], 0)
     ldb_raw = "ldb.data"
+    perf_raw = "perf.data"
     if len(sys.argv) > 3:
         ldb_raw = argv[3]
-    generate_stats(sys.argv[1], ldb_raw, int(sys.argv[2]))
+    if len(sys.argv) > 4:
+        perf_raw = argv[4]
+    generate_stats(sys.argv[1], int(sys.argv[2]), ldb_raw, perf_raw)
     #process_file(sys.argv[2], addr)

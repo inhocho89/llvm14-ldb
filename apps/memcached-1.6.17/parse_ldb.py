@@ -105,13 +105,13 @@ def generate_stats(executable, ldb_raw):
         with open(ldb_raw, 'r') as ldb_raw_file:
             csv_reader = csv.reader(ldb_raw_file, delimiter=',')
             for row in csv_reader:
-                if (len(row) != 6):
+                if (len(row) != 7):
                     continue
                 #timestamp = int(row[0])
                 #thread_id = int(row[1])
                 #tag = int(row[2])
                 #ngen = int(row[3])
-                latency = float(row[4])
+                latency = float(row[4]) / 1000.0
                 pc = int(row[5],0)
 
                 if pc in latencies:

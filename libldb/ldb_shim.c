@@ -5,6 +5,8 @@
 #include <string.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <syscall.h>
+#include <unistd.h>
 #include <bits/pthreadtypes.h>
 #include <dlfcn.h>
 
@@ -76,7 +78,7 @@ void *__ldb_thread_start(void *arg) {
 
   free(arg);
 
-  printf("New interposed thread is starting...\n");
+  printf("New interposed thread is starting... thread ID = %ld\n", syscall(SYS_gettid));
   printf("ngen = %lu, tls rbp = %p, real rbp = %p\n", get_ngen(), get_rbp(), get_real_rbp());
 
   // attach shared memory
@@ -87,7 +89,7 @@ void *__ldb_thread_start(void *arg) {
   // start tracking
   pthread_spin_lock(&(ldb_shared->ldb_tlock));
   tidx = __ldb_get_tidx();
-  ldb_shared->ldb_thread_info[tidx].id = pthread_self();
+  ldb_shared->ldb_thread_info[tidx].id = syscall(SYS_gettid);
   ldb_shared->ldb_thread_info[tidx].fsbase = (char **)(rdfsbase());
   pthread_spin_unlock(&(ldb_shared->ldb_tlock));
 

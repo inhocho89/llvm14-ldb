@@ -5,7 +5,9 @@
 #include <string.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <syscall.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "ldb.h"
 
@@ -20,12 +22,13 @@
 ldb_shmseg *ldb_shared;
 
 struct LDBEvent {
-  uint64_t timestamp;
+  struct timespec ts;
   uint32_t thread_id;
   uint64_t tag;
   uint64_t ngen;
   uint64_t latency;
   char *rip;
+  double elapsed;
 };
 
 static int eventTail = 0;
@@ -39,8 +42,8 @@ static inline int recordSize() {
   return (LDB_REPORT_BUF_SIZE + (i % LDB_REPORT_BUF_SIZE)) % LDB_REPORT_BUF_SIZE;
 }
 
-static void record(uint64_t timestamp_, pthread_t tid_, uint64_t tag_,
-    uint64_t ngen_, uint64_t latency_, char *rip_) {
+static void record(struct timespec ts_, pthread_t tid_, uint64_t tag_,
+    uint64_t ngen_, uint64_t latency_, char *rip_, double elapsed_) {
 
   // If queue becomes full, ignore datapoint.
   if ((eventTail + 1) % LDB_REPORT_BUF_SIZE == eventHead) {
@@ -50,12 +53,13 @@ static void record(uint64_t timestamp_, pthread_t tid_, uint64_t tag_,
 
   struct LDBEvent *event = &events[eventTail];
 
-  event->timestamp = timestamp_;
+  event->ts = ts_;
   event->thread_id = (uint32_t)tid_;
   event->tag = tag_;
   event->ngen = ngen_;
   event->latency = latency_;
   event->rip = rip_;
+  event->elapsed = elapsed_;
 
   pthread_mutex_lock(&mEvent);
   eventTail = (eventTail + 1) % LDB_REPORT_BUF_SIZE;
@@ -102,15 +106,19 @@ void *monitor_main(void *arg) {
   char ***ldb_rip;
   uint64_t **ldb_latency;
   int *ldb_cnt;
-  uint64_t last_tsc;
+  struct timespec last_ts;
+  struct timespec start_ts;
 
   // temporary variables
   uint64_t temp_tag[LDB_MAX_CALLDEPTH];
   uint64_t temp_ngen[LDB_MAX_CALLDEPTH];
   char *temp_rip[LDB_MAX_CALLDEPTH];
 
-  uint64_t now;
+  struct timespec now;
   uint64_t elapsed;
+
+  uint64_t elapsed_from_start;
+  uint64_t nupdate = 0;
 
   // allocate memory for bookkeeping
   ldb_tag = (uint64_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint64_t *));
@@ -128,14 +136,18 @@ void *monitor_main(void *arg) {
 
   memset(ldb_cnt, 0, sizeof(int) * LDB_MAX_NTHREAD);
 
+  clock_gettime(CLOCK_MONOTONIC, &start_ts);
+  last_ts = start_ts;
+
   printf("Monitor starts\n");
   
   // Currently busy-running
   while (1) {
     barrier();
-    now = rdtsc();
+    clock_gettime(CLOCK_MONOTONIC, &now);
     barrier();
-    elapsed = now - last_tsc;
+    elapsed = (now.tv_sec - last_ts.tv_sec) * 1000000000 + (now.tv_nsec - last_ts.tv_nsec);
+    elapsed_from_start = (now.tv_sec - start_ts.tv_sec) * 1000000000 + (now.tv_nsec - start_ts.tv_nsec);
 
     for (int tidx = 0; tidx < ldb_shared->ldb_max_idx; ++tidx) {
       // Skip if fsbase is invalid
@@ -212,7 +224,8 @@ void *monitor_main(void *arg) {
       // Record data collected
       for (int i = gidx; i < ldb_cnt[tidx]; ++i) {
         //printf("%lu\n", ldb_latency[tidx][i]);
-        record(now, thread_id, ldb_tag[tidx][i], ldb_ngen[tidx][i], ldb_latency[tidx][i], ldb_rip[tidx][i]);
+        record(now, thread_id, ldb_tag[tidx][i], ldb_ngen[tidx][i], ldb_latency[tidx][i],
+            ldb_rip[tidx][i], 1.0 * elapsed_from_start / nupdate);
       }
 
       // Add new nodes
@@ -224,10 +237,11 @@ void *monitor_main(void *arg) {
         gidx++;
         lidx--;
       }
-
       ldb_cnt[tidx] = gidx;
     } // for
-    last_tsc = now;
+
+    nupdate++;
+    last_ts = now;
   } // while true
 
   return NULL;
@@ -239,9 +253,9 @@ void *logger_main(void *arg) {
   while (1) {
     while (eventHead != eventTail) {
       struct LDBEvent *event = &events[eventHead];
-      fprintf(ldb_fout, "%lu,%u,%lu,%lu,%lu,%p\n",
-          event->timestamp, event->thread_id, event->tag, event->ngen,
-          event->latency, event->rip);
+      fprintf(ldb_fout, "%lu.%09lu,%u,%lu,%lu,%lu,%p,%lf\n",
+          event->ts.tv_sec, event->ts.tv_nsec, event->thread_id, event->tag,
+          event->ngen, event->latency, event->rip, event->elapsed);
 
       eventHead = (eventHead + 1) % LDB_REPORT_BUF_SIZE;
     }
@@ -270,7 +284,7 @@ void __ldbInit(void) {
   memset(ldb_shared, 0, sizeof(ldb_thread_info_t) * LDB_MAX_NTHREAD);
 
   // Set main thread's fsbase
-  ldb_shared->ldb_thread_info[0].id = pthread_self();
+  ldb_shared->ldb_thread_info[0].id = syscall(SYS_gettid);
   ldb_shared->ldb_thread_info[0].fsbase = (char **)(rdfsbase());
   ldb_shared->ldb_nthread = 1;
   ldb_shared->ldb_max_idx = 1;
