@@ -186,7 +186,9 @@ void *monitor_main(void *arg) {
 
         // invalid generation number or rip
         if (ngen > slock2 || rip == NULL) {
-          break;
+          prbp = rbp;
+          rbp = (char *)(*((uint64_t *)rbp));
+          continue;
         }
 
         temp_tag[lidx] = tag;
