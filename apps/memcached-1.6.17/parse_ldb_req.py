@@ -22,8 +22,6 @@ from elftools.common.utils import bytes2str
 from elftools.dwarf.descriptions import describe_form_class
 from elftools.elf.elffile import ELFFile
 
-CYCLES_PER_US = 2992
-
 def decode_funcname(dwarfinfo, address):
     # Go over all DIEs in the DWARF information, looking for a subprogram
     # entry with an address range that includes the given address. Note that
@@ -94,13 +92,17 @@ def generate_stats(executable, mreq, ldb_raw, perf_raw):
     print('executable: {}'.format(executable))
     print('LDB data: {}'.format(ldb_raw))
     print('Perf data: {}'.format(perf_raw))
+    perf_decode = "perf.dec"
     if os.path.exists(perf_raw):
-        perf_decode = "perf.dec"
-        print('  generating decoded data...')
-        if(os.system('sudo perf sched script -F time,tid,cpu,event,ip,sym > {}'.format(perf_decode)) != 0):
-            print('[Error] Decoding perf data failed. Please check the permission')
-        print('  generated {}'.format(perf_decode))
+        if not os.path.exists(perf_decode):
+            print('  generating decoded data...')
+            if(os.system('sudo perf sched script -F time,tid,cpu,event,ip,sym > {}'.format(perf_decode)) != 0):
+                print('[Error] Decoding perf data failed. Please check the permission')
+            print('  generated {}'.format(perf_decode))
+        else:
+            print('  {} already exists'.format(perf_decode))
     else:
+        perf_decode = ""
         print('  Cannot find perf data')
 
     with open(executable, 'rb') as e:
@@ -114,38 +116,41 @@ def generate_stats(executable, mreq, ldb_raw, perf_raw):
         dwarfinfo = elffile.get_dwarf_info()
 
         filter_req = []
-        thread_dict = {}
+        thread_list = []
         pc_buf = {}
         nthread = 0
         min_tsc = 0
+        max_tsc = 0
 
         print("req ID = {:d}".format(mreq))
         # collect latency informations
         with open(ldb_raw, 'r') as ldb_raw_file:
             csv_reader = csv.reader(ldb_raw_file, delimiter=',')
             for row in csv_reader:
-                if (len(row) != 6):
+                if (len(row) != 7):
                     continue
-                timestamp = int(row[0])
+                timestamp = float(row[0])
+                timestamp_us = timestamp * 1000
                 thread_id = int(row[1])
                 nreq = int(row[2])
                 ngen = int(row[3])
                 latency = int(row[4])
+                latency_us = latency / 1000.0
                 pc = int(row[5],0)
 
-                timestamp -= latency
+                timestamp_us -= latency_us
 
                 if nreq != mreq:
                     continue
 
-                if min_tsc == 0 or min_tsc > timestamp:
-                    min_tsc = timestamp
+                if min_tsc == 0 or min_tsc > timestamp_us:
+                    min_tsc = timestamp_us
 
-                if thread_id not in thread_dict:
-                    thread_dict[thread_id] = nthread
-                    nthread += 1
-                
-                thread_idx = thread_dict[thread_id]
+                if max_tsc == 0 or max_tsc < timestamp_us:
+                    max_tsc = timestamp_us
+
+                if thread_id not in thread_list:
+                    thread_list.append(thread_id)
 
                 pc -= 5
                 if pc not in pc_buf:
@@ -157,51 +162,95 @@ def generate_stats(executable, mreq, ldb_raw, perf_raw):
                 if fname == None:
                     continue
 
-                filter_req.append({'tsc': timestamp,
-                    'thread_idx': thread_idx,
+                filter_req.append({'tsc': timestamp_us,
+                    'thread_idx': thread_id,
                     'ngen': ngen,
-                    'latency': latency,
+                    'latency': latency_us,
                     'pc': pc,
                     'fname': bytes2str(fname),
                     'line': line,
                     'col': col})
         
         def filter_req_sort(e):
-            return e['ngen']
+            return e['tsc']
 
         filter_req.sort(key=filter_req_sort)
 
-        for e in filter_req:
-            print("{:f}, {:d}, {:d}, {:f}, {} ({}:{:d}:{:d})"
-                    .format((e['tsc'] - min_tsc) / CYCLES_PER_US, e['thread_idx'], e['ngen'],
-                        e['latency'] / CYCLES_PER_US, hex(e['pc']), e['fname'], e['line'], e['col']))
+        with open(perf_decode, "r") as perf_dec_file:
+            csv_reader = csv.reader(perf_dec_file, skipinitialspace=True, delimiter=' ')
+            row_in_time = []
+            prow = None
+            for row in csv_reader:
+                thread_id = int(row[0])
+                cpu_id = int(row[1][1:-1])
+                timestamp = float(row[2][:-1])
+                timestamp_us = timestamp * 1000
+                event = row[3][:-1]
+                bpf_output = " ".join(row[4:])
 
-        """
-        latencies_ordered = []
-        for pc, larr in latencies.items():
-            pc -= 5
-            larr.sort()
-            N = len(larr)
-            latencies_ordered.append({'pc': pc, 'num_samples': N, 'median': larr[int(N * 0.5)],
-                '90p': larr[int(N * 0.9)], '99p': larr[int(N * 0.99)], '999p': larr[int(N * 0.999)]})
+                skip = True
 
-        def dist_distance(e):
-            return e['999p'] - e['median']
+                if thread_id in thread_list:
+                    skip = False
 
-        latencies_ordered.sort(key=dist_distance, reverse=True)
+                for tid in thread_list:
+                    if "next_pid={:d}".format(tid) in row[4:] \
+                            or "pid={:d}".format(tid) in row[4:]:
+                        skip = False
 
-        for e in latencies_ordered:
-            fname, line, col = decode_file_line(dwarfinfo, e['pc'])
-            if fname == None:
-                continue
+                if skip:
+                    continue
 
-            print('{}:{:d}:{:d} (pc={})'.format(bytes2str(fname), line, col, hex(e['pc'])))
-            print('    num_samples: {:d}'.format(e['num_samples']))
-            print('    median: {:.4f}'.format(e['median']))
-            print('    90p: {:.4f}'.format(e['90p']))
-            print('    99p: {:.4f}'.format(e['99p']))
-            print('    99.9p: {:.4f}'.format(e['999p']))
-        """
+                if timestamp_us > max_tsc:
+                    break
+
+                if timestamp_us < min_tsc:
+                    prow = {'tsc': timestamp_us,
+                            'thread_id': thread_id,
+                            'cpu_id': cpu_id,
+                            'event': event,
+                            'bpf_output': bpf_output}
+                    continue
+
+                if len(row_in_time) == 0 and prow != None:
+                    row_in_time.append(prow)
+
+                row_in_time.append({'tsc': timestamp_us,
+                                    'thread_id': thread_id,
+                                    'cpu_id': cpu_id,
+                                    'event': event,
+                                    'bpf_output': bpf_output})
+
+
+
+        ldb_i = 0
+        perf_i = 0
+
+        while ldb_i < len(filter_req) and perf_i < len(row_in_time):
+            le = filter_req[ldb_i]
+            pe = row_in_time[perf_i]
+            if le['tsc'] < pe['tsc']:
+                print("{:f} (+{:f}), {:d}, {:d}, {:f}, {} ({}:{:d}:{:d})"
+                        .format(le['tsc'], le['tsc'] - min_tsc, le['thread_idx'], le['ngen'],
+                            le['latency'], hex(le['pc']), le['fname'],
+                                le['line'], le['col']))
+                ldb_i += 1
+            else:
+                print("**  {:f} (+{:f}), {:d}, {:d}, {}, {}"
+                    .format(pe['tsc'], pe['tsc'] - min_tsc, pe['thread_id'], pe['cpu_id'],
+                            pe['event'], pe['bpf_output']))
+                perf_i += 1
+
+        for e in filter_req[ldb_i:]:
+            print("{:f} (+{:f}), {:d}, {:d}, {:f}, {} ({}:{:d}:{:d})"
+                    .format(e['tsc'], e['tsc'] - min_tsc, e['thread_idx'], e['ngen'],
+                        e['latency'], hex(e['pc']), e['fname'], e['line'], e['col']))
+
+        for e in row_in_time[perf_i:]:
+            print("**  {:f} (+{:f}), {:d}, {:d}, {}, {}"
+                  .format(e['tsc'], e['tsc'] - min_tsc, e['thread_id'], e['cpu_id'],
+                          e['event'], e['bpf_output']))
+
 if __name__ == '__main__':
     if len(sys.argv) < 3:
         print('Expected usage: {0} <executable> <req#> <ldb raw output=ldb.data> <perf raw output=perf.data>'.format(sys.argv[0]))
