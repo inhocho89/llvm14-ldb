@@ -28,7 +28,7 @@ struct LDBEvent {
   uint64_t ngen;
   uint64_t latency;
   char *rip;
-  double elapsed;
+  uint64_t elapsed;
 };
 
 static int eventTail = 0;
@@ -43,7 +43,7 @@ static inline int recordSize() {
 }
 
 static void record(struct timespec ts_, pthread_t tid_, uint64_t tag_,
-    uint64_t ngen_, uint64_t latency_, char *rip_, double elapsed_) {
+    uint64_t ngen_, uint64_t latency_, char *rip_, uint64_t elapsed_) {
 
   // If queue becomes full, ignore datapoint.
   if ((eventTail + 1) % LDB_REPORT_BUF_SIZE == eventHead) {
@@ -184,8 +184,8 @@ void *monitor_main(void *arg) {
 
         //printf("[%d] rbp = %p, canary = %lu, ngen = %lu, rip = %p\n", lidx, rbp, canary, ngen, rip);
 
-        // invalid generation number
-        if (ngen > slock2) {
+        // invalid generation number or rip
+        if (ngen > slock2 || rip == NULL) {
           break;
         }
 
@@ -225,7 +225,7 @@ void *monitor_main(void *arg) {
       for (int i = gidx; i < ldb_cnt[tidx]; ++i) {
         //printf("%lu\n", ldb_latency[tidx][i]);
         record(now, thread_id, ldb_tag[tidx][i], ldb_ngen[tidx][i], ldb_latency[tidx][i],
-            ldb_rip[tidx][i], 1.0 * elapsed_from_start / nupdate);
+            ldb_rip[tidx][i], elapsed);
       }
 
       // Add new nodes
@@ -253,7 +253,7 @@ void *logger_main(void *arg) {
   while (1) {
     while (eventHead != eventTail) {
       struct LDBEvent *event = &events[eventHead];
-      fprintf(ldb_fout, "%lu.%09lu,%u,%lu,%lu,%lu,%p,%lf\n",
+      fprintf(ldb_fout, "%lu.%09lu,%u,%lu,%lu,%lu,%p,%lu\n",
           event->ts.tv_sec, event->ts.tv_nsec, event->thread_id, event->tag,
           event->ngen, event->latency, event->rip, event->elapsed);
 
