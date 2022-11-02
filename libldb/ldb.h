@@ -4,7 +4,7 @@
 #define LDB_MAX_NTHREAD 128
 
 typedef struct {
-  pthread_t id;
+  pid_t id;
   char **fsbase;
 } ldb_thread_info_t;
 

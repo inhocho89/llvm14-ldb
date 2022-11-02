@@ -11,6 +11,7 @@
 #include <dlfcn.h>
 
 #include "ldb.h"
+#include "ldb_tag.h"
 
 ldb_shmseg *ldb_shared;
 
@@ -80,6 +81,9 @@ void *__ldb_thread_start(void *arg) {
 
   printf("New interposed thread is starting... thread ID = %ld\n", syscall(SYS_gettid));
   printf("ngen = %lu, tls rbp = %p, real rbp = %p\n", get_ngen(), get_rbp(), get_real_rbp());
+
+  // clear tag
+  __ldb_clear_tag();
 
   // attach shared memory
   key_t shm_key = ftok("ldb", 65);
@@ -180,6 +184,19 @@ void *memset(void *str, int c, size_t n) {
   }
 
   return real_memset(str, c, n);
+}
+
+void *memcpy(void *dest, const void *src, size_t len) {
+  char *error;
+  void *(*real_memcpy)(void *, const void *, size_t);
+
+  real_memcpy = dlsym(RTLD_NEXT, "memcpy");
+  if ((error = dlerror()) != NULL) {
+    fputs(error, stderr);
+    return NULL;
+  }
+
+  return real_memcpy(dest, src, len);
 }
 
 void *malloc(size_t size) {

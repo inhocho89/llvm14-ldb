@@ -1,5 +1,6 @@
 #include <inttypes.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,11 +11,12 @@
 #include <unistd.h>
 
 #include "ldb.h"
+#include "ldb_tag.h"
 
 #define CYCLES_PER_US 2992
 #define LDB_MAX_CALLDEPTH 1024
-#define LDB_REPORT_BUF_SIZE 2048
-#define LDB_REPORT_THRESH 256
+#define LDB_REPORT_BUF_SIZE 4096
+#define LDB_REPORT_THRESH 128
 #define LDB_REPORT_OUTPUT "ldb.data"
 
 #define barrier()       asm volatile("" ::: "memory")
@@ -23,8 +25,8 @@ ldb_shmseg *ldb_shared;
 
 struct LDBEvent {
   struct timespec ts;
-  uint32_t thread_id;
-  uint64_t tag;
+  pid_t thread_id;
+  uint32_t tag;
   uint64_t ngen;
   uint64_t latency;
   char *rip;
@@ -42,7 +44,7 @@ static inline int recordSize() {
   return (LDB_REPORT_BUF_SIZE + (i % LDB_REPORT_BUF_SIZE)) % LDB_REPORT_BUF_SIZE;
 }
 
-static void record(struct timespec ts_, pthread_t tid_, uint64_t tag_,
+static void record(struct timespec ts_, pid_t tid_, uint32_t tag_,
     uint64_t ngen_, uint64_t latency_, char *rip_, uint64_t elapsed_) {
 
   // If queue becomes full, ignore datapoint.
@@ -54,7 +56,7 @@ static void record(struct timespec ts_, pthread_t tid_, uint64_t tag_,
   struct LDBEvent *event = &events[eventTail];
 
   event->ts = ts_;
-  event->thread_id = (uint32_t)tid_;
+  event->thread_id = tid_;
   event->tag = tag_;
   event->ngen = ngen_;
   event->latency = latency_;
@@ -101,16 +103,17 @@ static inline __attribute__((always_inline)) char *get_rbp() {
 
 void *monitor_main(void *arg) {
   // stats to collect
-  uint64_t **ldb_tag;
+  uint32_t **ldb_tag;
   uint64_t **ldb_ngen;
   char ***ldb_rip;
   uint64_t **ldb_latency;
   int *ldb_cnt;
+  int *ldb_maxngen;
   struct timespec last_ts;
   struct timespec start_ts;
 
   // temporary variables
-  uint64_t temp_tag[LDB_MAX_CALLDEPTH];
+  uint32_t temp_tag[LDB_MAX_CALLDEPTH];
   uint64_t temp_ngen[LDB_MAX_CALLDEPTH];
   char *temp_rip[LDB_MAX_CALLDEPTH];
 
@@ -121,20 +124,23 @@ void *monitor_main(void *arg) {
   uint64_t nupdate = 0;
 
   // allocate memory for bookkeeping
-  ldb_tag = (uint64_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint64_t *));
+  ldb_tag = (uint32_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint32_t *));
   ldb_ngen = (uint64_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint64_t *));
   ldb_rip = (char ***)malloc(LDB_MAX_NTHREAD * sizeof(char **));
   ldb_latency = (uint64_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint64_t *));
   ldb_cnt = (int *)malloc(LDB_MAX_NTHREAD * sizeof(int));
+  // DEBUG: maximum ngen i have seen
+  ldb_maxngen = (int *)malloc(LDB_MAX_NTHREAD * sizeof(int));
 
   for (int i = 0; i < LDB_MAX_CALLDEPTH; ++i) {
-    ldb_tag[i] = (uint64_t *)malloc(LDB_MAX_CALLDEPTH * sizeof(uint64_t));
+    ldb_tag[i] = (uint32_t *)malloc(LDB_MAX_CALLDEPTH * sizeof(uint32_t));
     ldb_ngen[i] = (uint64_t *)malloc(LDB_MAX_CALLDEPTH * sizeof(uint64_t));
     ldb_rip[i] = (char **)malloc(LDB_MAX_CALLDEPTH * sizeof(char *));
     ldb_latency[i] = (uint64_t *)malloc(LDB_MAX_CALLDEPTH * sizeof(uint64_t));
   }
 
   memset(ldb_cnt, 0, sizeof(int) * LDB_MAX_NTHREAD);
+  memset(ldb_maxngen, 0, sizeof(int) * LDB_MAX_NTHREAD);
 
   clock_gettime(CLOCK_MONOTONIC, &start_ts);
   last_ts = start_ts;
@@ -154,7 +160,7 @@ void *monitor_main(void *arg) {
       if (ldb_shared->ldb_thread_info[tidx].fsbase == NULL)
         continue;
 
-      pthread_t thread_id = ldb_shared->ldb_thread_info[tidx].id;
+      pid_t thread_id = ldb_shared->ldb_thread_info[tidx].id;
       char ***fsbase = &(ldb_shared->ldb_thread_info[tidx].fsbase);
       int lidx = 0;
       char *prbp = NULL;
@@ -162,33 +168,52 @@ void *monitor_main(void *arg) {
       // use initial rbp as sequence lock
       char *slock = rbp;
       uint64_t slock2 = *(uint64_t *)(*fsbase - 2);
-      uint64_t ngen;
-      uint64_t tag;
+      uint64_t ngen = 99;
+      uint64_t canary_and_tag;
+      uint32_t tag;
+      uint32_t canary;
       char *rip;
-
-      // check for valid RBP
-      if (rbp < (char *)0x100000000000) {
+      bool skip_record = false;
+      
+      if (rbp <= (char *)0x700000000000 || rbp >= (char *)0x800000000000) {
         continue;
       }
 
       // traversing stack frames
-      while (rbp != NULL && rbp > prbp) {
-        // invalid RBP
-        if (rbp >= (char *)0x800000000000) {
+      while (rbp != NULL && ngen > 1) {
+        // Invalid RBP with Heuristic threshold
+        // Probably dynamic loading...
+        if (rbp <= (char *)0x700000000000 || rbp >= (char *)0x800000000000) {
+          skip_record = true;
           break;
         }
 
-        tag = *((uint64_t *)(rbp + 8));
+        canary_and_tag = *((uint64_t *)(rbp + 8));
+        canary = (uint32_t)(canary_and_tag >> 32);
+        tag = (uint32_t)(canary_and_tag & 0xffffffff);
         ngen = *((uint64_t *)(rbp + 16));
         rip = (char *)(*((uint64_t *)(rbp + 24)));
 
-        //printf("[%d] rbp = %p, canary = %lu, ngen = %lu, rip = %p\n", lidx, rbp, canary, ngen, rip);
+        //printf("[%d:%d] rbp = %p, nextrbp = %p, ngen = %lu (thread_ngen = %lu), rip = %p, tag = %u, canary = %u\n",
+        //    tidx, lidx, rbp, (char *)(*((uint64_t *)rbp)), ngen, slock2, rip, tag, canary);
 
-        // invalid generation number or rip
-        if (ngen > slock2 || rip == NULL) {
+        // this is the final frame.
+        if (ngen == 1) {
+          skip_record = false;
+          break;
+        }
+
+        // If RIP is dynamically loaded one, skip (we cannot trace anyway)
+        if (rip > (char *)0x500000) {
           prbp = rbp;
           rbp = (char *)(*((uint64_t *)rbp));
           continue;
+        }
+
+        // invalid stack frame. halting
+        if (ngen > slock2 || ngen == 0 || rip == NULL || canary != LDB_CANARY) {
+          skip_record = true;
+          break;
         }
 
         temp_tag[lidx] = tag;
@@ -215,6 +240,10 @@ void *monitor_main(void *arg) {
 
       // Update latency
       int gidx = 0;
+
+      while (gidx < ldb_cnt[tidx] && ldb_ngen[tidx][gidx] != temp_ngen[lidx-1])
+        gidx++;
+
       while (gidx < ldb_cnt[tidx] && lidx > 0) {
         if (ldb_ngen[tidx][gidx] != temp_ngen[lidx-1])
           break;
@@ -223,9 +252,13 @@ void *monitor_main(void *arg) {
         lidx--;
       }
 
+      // handle dynamic loading
+      if (skip_record) {
+        gidx = ldb_cnt[tidx];
+      }
+
       // Record data collected
       for (int i = gidx; i < ldb_cnt[tidx]; ++i) {
-        //printf("%lu\n", ldb_latency[tidx][i]);
         record(now, thread_id, ldb_tag[tidx][i], ldb_ngen[tidx][i], ldb_latency[tidx][i],
             ldb_rip[tidx][i], elapsed);
       }
@@ -236,6 +269,7 @@ void *monitor_main(void *arg) {
         ldb_ngen[tidx][gidx] = temp_ngen[lidx - 1];
         ldb_latency[tidx][gidx] = 0;
         ldb_rip[tidx][gidx] = temp_rip[lidx - 1];
+
         gidx++;
         lidx--;
       }
@@ -255,7 +289,7 @@ void *logger_main(void *arg) {
   while (1) {
     while (eventHead != eventTail) {
       struct LDBEvent *event = &events[eventHead];
-      fprintf(ldb_fout, "%lu.%09lu,%u,%lu,%lu,%lu,%p,%lu\n",
+      fprintf(ldb_fout, "%lu.%09lu,%u,%u,%lu,%lu,%p,%lu\n",
           event->ts.tv_sec, event->ts.tv_nsec, event->thread_id, event->tag,
           event->ngen, event->latency, event->rip, event->elapsed);
 
@@ -277,6 +311,9 @@ void *logger_main(void *arg) {
 
 // This is the main function instrumented
 void __ldbInit(void) {
+  // clear tag
+  __ldb_clear_tag();
+
   // attach shared memory
   key_t shm_key = ftok("ldb", 65);
   int shmid = shmget(shm_key, sizeof(ldb_shmseg), 0644|IPC_CREAT);
