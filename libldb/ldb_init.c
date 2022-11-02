@@ -180,11 +180,12 @@ void *monitor_main(void *arg) {
       }
 
       // traversing stack frames
-      while (rbp != NULL && ngen > 1) {
+      while (rbp != NULL && ngen > 2) {
         // Invalid RBP with Heuristic threshold
         // Probably dynamic loading...
         if (rbp <= (char *)0x700000000000 || rbp >= (char *)0x800000000000) {
-          skip_record = true;
+          //printf("\tInvalid rbp = %p, ngen=%d\n", rbp, ngen);
+//          skip_record = true;
           break;
         }
 
@@ -198,8 +199,13 @@ void *monitor_main(void *arg) {
         //    tidx, lidx, rbp, (char *)(*((uint64_t *)rbp)), ngen, slock2, rip, tag, canary);
 
         // this is the final frame.
-        if (ngen == 1) {
-          skip_record = false;
+        // no further check
+        if (ngen == 1 || ngen == 2) {
+//          skip_record = false;
+          temp_tag[lidx] = tag;
+          temp_ngen[lidx] = ngen;
+          temp_rip[lidx] = rip;
+          lidx++;
           break;
         }
 
@@ -212,7 +218,8 @@ void *monitor_main(void *arg) {
 
         // invalid stack frame. halting
         if (ngen > slock2 || ngen == 0 || rip == NULL || canary != LDB_CANARY) {
-          skip_record = true;
+          //printf("\tInvalid stack frame: ngen=%lu, rip=%p, canary=%u\n", ngen, rip, canary);
+//          skip_record = true;
           break;
         }
 
@@ -225,6 +232,7 @@ void *monitor_main(void *arg) {
             slock != *(*fsbase - 1) ||
             slock2 != *(uint64_t *)(*fsbase - 2)) {
           lidx = 0;
+          //printf("\tStack mod\n");
           break;
         }
 
@@ -240,9 +248,23 @@ void *monitor_main(void *arg) {
 
       // Update latency
       int gidx = 0;
+/*
+      printf("lc = ");
+      for (int j = lidx-1; j >= 0; --j) {
+        printf("%d:%lu ", j, temp_ngen[j]);
+      }
+      printf("\n");
 
+      printf("glb = ");
+      for (int j = 0; j < ldb_cnt[tidx]; ++j) {
+        printf("%d:%lu ", j, ldb_ngen[tidx][j]);
+      }
+      printf("\n");
+*/
       while (gidx < ldb_cnt[tidx] && ldb_ngen[tidx][gidx] != temp_ngen[lidx-1])
         gidx++;
+
+      skip_record = (gidx >= ldb_cnt[tidx]);
 
       while (gidx < ldb_cnt[tidx] && lidx > 0) {
         if (ldb_ngen[tidx][gidx] != temp_ngen[lidx-1])
@@ -254,11 +276,13 @@ void *monitor_main(void *arg) {
 
       // handle dynamic loading
       if (skip_record) {
+        //printf("\t skip record\n");
         gidx = ldb_cnt[tidx];
       }
 
       // Record data collected
       for (int i = gidx; i < ldb_cnt[tidx]; ++i) {
+        //printf("Recording %lu!\n", ldb_ngen[tidx][i]);
         record(now, thread_id, ldb_tag[tidx][i], ldb_ngen[tidx][i], ldb_latency[tidx][i],
             ldb_rip[tidx][i], elapsed);
       }
