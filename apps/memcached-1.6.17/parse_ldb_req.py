@@ -130,7 +130,7 @@ def generate_stats(executable, mreq, ldb_raw, perf_raw):
                 if (len(row) != 7):
                     continue
                 timestamp = float(row[0])
-                timestamp_us = timestamp * 1000
+                timestamp_us = timestamp * 1000000
                 thread_id = int(row[1])
                 nreq = int(row[2])
                 ngen = int(row[3])
@@ -184,7 +184,7 @@ def generate_stats(executable, mreq, ldb_raw, perf_raw):
                 thread_id = int(row[0])
                 cpu_id = int(row[1][1:-1])
                 timestamp = float(row[2][:-1])
-                timestamp_us = timestamp * 1000
+                timestamp_us = timestamp * 1000000
                 event = row[3][:-1]
                 bpf_output = " ".join(row[4:])
 
