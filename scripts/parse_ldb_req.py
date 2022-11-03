@@ -96,7 +96,7 @@ def generate_stats(executable, mreq, ldb_raw, perf_raw):
     if os.path.exists(perf_raw):
         if not os.path.exists(perf_decode):
             print('  generating decoded data...')
-            if(os.system('sudo perf sched script -F time,tid,cpu,event,ip,sym > {}'.format(perf_decode)) != 0):
+            if(os.system('sudo perf sched script --ns -F -comm > {}'.format(perf_decode)) != 0):
                 print('[Error] Decoding perf data failed. Please check the permission')
             print('  generated {}'.format(perf_decode))
         else:
