@@ -35,8 +35,6 @@ struct LDBEvent {
 
 static int eventTail = 0;
 static int eventHead = 0;
-static pthread_mutex_t mEvent = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t cvEvent = PTHREAD_COND_INITIALIZER;
 static struct LDBEvent events[LDB_REPORT_BUF_SIZE];
 
 static inline int recordSize() {
@@ -63,12 +61,8 @@ static void record(struct timespec ts_, pid_t tid_, uint32_t tag_,
   event->rip = rip_;
   event->elapsed = elapsed_;
 
-  pthread_mutex_lock(&mEvent);
+  barrier();
   eventTail = (eventTail + 1) % LDB_REPORT_BUF_SIZE;
-  if (recordSize() > LDB_REPORT_THRESH) {
-    pthread_cond_broadcast(&cvEvent);
-  }
-  pthread_mutex_unlock(&mEvent);
 }
 
 // Helper functions
@@ -99,6 +93,12 @@ static inline __attribute__((always_inline)) char *get_rbp() {
   asm volatile ("movq %%rbp, %0 \n\t" : "=r"(rbp) :: "memory");
 
   return rbp;
+}
+
+static inline bool is_stack_modified(char ***fsbase, char *slock,
+    uint64_t slock2) {
+  return (*fsbase == NULL || slock != *(*fsbase - 1) ||
+        slock2 != *(uint64_t *)(*fsbase - 2));
 }
 
 void *monitor_main(void *arg) {
@@ -185,7 +185,12 @@ void *monitor_main(void *arg) {
         // Probably dynamic loading...
         if (rbp <= (char *)0x700000000000 || rbp >= (char *)0x800000000000) {
           //printf("\tInvalid rbp = %p, ngen=%d\n", rbp, ngen);
-//          skip_record = true;
+          break;
+        }
+
+        // check whether stack has been modified
+        if (is_stack_modified(fsbase, slock, slock2)) {
+          lidx = 0;
           break;
         }
 
@@ -195,17 +200,23 @@ void *monitor_main(void *arg) {
         ngen = *((uint64_t *)(rbp + 16));
         rip = (char *)(*((uint64_t *)(rbp + 24)));
 
-        //printf("[%d:%d] rbp = %p, nextrbp = %p, ngen = %lu (thread_ngen = %lu), rip = %p, tag = %u, canary = %u\n",
-        //    tidx, lidx, rbp, (char *)(*((uint64_t *)rbp)), ngen, slock2, rip, tag, canary);
+        //printf("[%d:%d] rbp=%p, nextrbp=%p, ngen=%lu (thread_ngen=%lu), rip=%p, tag=%u, canary=%u\n",
+         //   tidx, lidx, rbp, (char *)(*((uint64_t *)rbp)), ngen, slock2, rip, tag, canary);
 
         // this is the final frame.
         // no further check
         if (ngen == 1 || ngen == 2) {
-//          skip_record = false;
           temp_tag[lidx] = tag;
           temp_ngen[lidx] = ngen;
           temp_rip[lidx] = rip;
           lidx++;
+          break;
+        }
+
+        // check whether stack has been modified
+        if (is_stack_modified(fsbase, slock, slock2)) {
+          lidx = 0;
+          //printf("\tstack mod\n");
           break;
         }
 
@@ -228,11 +239,9 @@ void *monitor_main(void *arg) {
         temp_rip[lidx] = rip;
 
         // check whether stack has been modified
-        if (*fsbase == NULL ||
-            slock != *(*fsbase - 1) ||
-            slock2 != *(uint64_t *)(*fsbase - 2)) {
+        if (is_stack_modified(fsbase, slock, slock2)) {
           lidx = 0;
-          //printf("\tStack mod\n");
+          //printf("\tstack mod\n");
           break;
         }
 
@@ -248,19 +257,6 @@ void *monitor_main(void *arg) {
 
       // Update latency
       int gidx = 0;
-/*
-      printf("lc = ");
-      for (int j = lidx-1; j >= 0; --j) {
-        printf("%d:%lu ", j, temp_ngen[j]);
-      }
-      printf("\n");
-
-      printf("glb = ");
-      for (int j = 0; j < ldb_cnt[tidx]; ++j) {
-        printf("%d:%lu ", j, ldb_ngen[tidx][j]);
-      }
-      printf("\n");
-*/
       while (gidx < ldb_cnt[tidx] && ldb_ngen[tidx][gidx] != temp_ngen[lidx-1])
         gidx++;
 
@@ -276,13 +272,11 @@ void *monitor_main(void *arg) {
 
       // handle dynamic loading
       if (skip_record) {
-        //printf("\t skip record\n");
         gidx = ldb_cnt[tidx];
       }
 
       // Record data collected
       for (int i = gidx; i < ldb_cnt[tidx]; ++i) {
-        //printf("Recording %lu!\n", ldb_ngen[tidx][i]);
         record(now, thread_id, ldb_tag[tidx][i], ldb_ngen[tidx][i], ldb_latency[tidx][i],
             ldb_rip[tidx][i], elapsed);
       }
@@ -317,16 +311,11 @@ void *logger_main(void *arg) {
           event->ts.tv_sec, event->ts.tv_nsec, event->thread_id, event->tag,
           event->ngen, event->latency, event->rip, event->elapsed);
 
+      barrier();
       eventHead = (eventHead + 1) % LDB_REPORT_BUF_SIZE;
     }
 
     fflush(ldb_fout);
-
-    pthread_mutex_lock(&mEvent);
-    while (eventHead == eventTail) {
-      pthread_cond_wait(&cvEvent, &mEvent);
-    }
-    pthread_mutex_unlock(&mEvent);
   }
 
   fclose(ldb_fout);
