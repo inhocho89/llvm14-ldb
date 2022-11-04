@@ -11,7 +11,7 @@
   * ``llvm14-ldb> mkdir build``
   * ``llvm14-ldb> cd build``
   * ``llvm14-ldb/build> cmake -DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_TARGET_ARCH=X86 -DCMAKE_BUILD_TYPE="Release" -DLLVM_BUILD_EXAMPLES=1 -DLLVM_INCLUDE_EXAMPLES=1 -DLLVM_ENABLE_PROJECTS="clang" -G "Unix Makefiles" ../llvm``
-  * ``cmake --build . -j``
+  * ``llvm14-ldb/build> cmake --build . -j``
 
 3. Compile LDB library
   * ``llvm14-ldb/build> cd ../libldb``
