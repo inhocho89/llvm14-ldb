@@ -15,15 +15,20 @@
 
 #define CYCLES_PER_US 2992
 #define LDB_MAX_CALLDEPTH 1024
-#define LDB_REPORT_BUF_SIZE 4096
-#define LDB_REPORT_THRESH 128
-#define LDB_REPORT_OUTPUT "ldb.data"
+#define LDB_EVENT_BUF_SIZE 200000
+#define LDB_EVENT_THRESH 100000
+#define LDB_EVENT_MIN_INT 10
+#define LDB_EVENT_OUTPUT "ldb.data"
 
 #define barrier()       asm volatile("" ::: "memory")
 
-ldb_shmseg *ldb_shared;
+static ldb_shmseg *ldb_shared;
+static pthread_t monitor_th;
+static pthread_t logger_th;
+static bool running;
+static int nWakeup;
 
-struct LDBEvent {
+typedef struct {
   struct timespec ts;
   pid_t thread_id;
   uint32_t tag;
@@ -31,27 +36,30 @@ struct LDBEvent {
   uint64_t latency;
   char *rip;
   uint64_t elapsed;
-};
+} LDBEvent;
 
 static int eventTail = 0;
 static int eventHead = 0;
-static struct LDBEvent events[LDB_REPORT_BUF_SIZE];
+static uint64_t lastWrite;
+static pthread_mutex_t mEvent = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t cvEvent = PTHREAD_COND_INITIALIZER;
+static LDBEvent *events;
 
 static inline int recordSize() {
   int i = eventTail - eventHead;
-  return (LDB_REPORT_BUF_SIZE + (i % LDB_REPORT_BUF_SIZE)) % LDB_REPORT_BUF_SIZE;
+  return (LDB_EVENT_BUF_SIZE + (i % LDB_EVENT_BUF_SIZE)) % LDB_EVENT_BUF_SIZE;
 }
 
 static void record(struct timespec ts_, pid_t tid_, uint32_t tag_,
     uint64_t ngen_, uint64_t latency_, char *rip_, uint64_t elapsed_) {
 
   // If queue becomes full, ignore datapoint.
-  if ((eventTail + 1) % LDB_REPORT_BUF_SIZE == eventHead) {
+  if ((eventTail + 1) % LDB_EVENT_BUF_SIZE == eventHead) {
     fprintf(stderr, "Warning: data point was ignored\n");
     return;
   }
 
-  struct LDBEvent *event = &events[eventTail];
+  LDBEvent *event = &events[eventTail];
 
   event->ts = ts_;
   event->thread_id = tid_;
@@ -61,8 +69,13 @@ static void record(struct timespec ts_, pid_t tid_, uint32_t tag_,
   event->rip = rip_;
   event->elapsed = elapsed_;
 
-  barrier();
-  eventTail = (eventTail + 1) % LDB_REPORT_BUF_SIZE;
+  pthread_mutex_lock(&mEvent);
+  eventTail = (eventTail + 1) % LDB_EVENT_BUF_SIZE;
+  if (recordSize() >= LDB_EVENT_THRESH ||
+      ts_.tv_sec - lastWrite >= LDB_EVENT_MIN_INT) {
+    pthread_cond_broadcast(&cvEvent);
+  }
+  pthread_mutex_unlock(&mEvent);
 }
 
 // Helper functions
@@ -108,7 +121,7 @@ void *monitor_main(void *arg) {
   char ***ldb_rip;
   uint64_t **ldb_latency;
   int *ldb_cnt;
-  int *ldb_maxngen;
+
   struct timespec last_ts;
   struct timespec start_ts;
 
@@ -129,10 +142,8 @@ void *monitor_main(void *arg) {
   ldb_rip = (char ***)malloc(LDB_MAX_NTHREAD * sizeof(char **));
   ldb_latency = (uint64_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint64_t *));
   ldb_cnt = (int *)malloc(LDB_MAX_NTHREAD * sizeof(int));
-  // DEBUG: maximum ngen i have seen
-  ldb_maxngen = (int *)malloc(LDB_MAX_NTHREAD * sizeof(int));
 
-  for (int i = 0; i < LDB_MAX_CALLDEPTH; ++i) {
+  for (int i = 0; i < LDB_MAX_NTHREAD; ++i) {
     ldb_tag[i] = (uint32_t *)malloc(LDB_MAX_CALLDEPTH * sizeof(uint32_t));
     ldb_ngen[i] = (uint64_t *)malloc(LDB_MAX_CALLDEPTH * sizeof(uint64_t));
     ldb_rip[i] = (char **)malloc(LDB_MAX_CALLDEPTH * sizeof(char *));
@@ -140,15 +151,16 @@ void *monitor_main(void *arg) {
   }
 
   memset(ldb_cnt, 0, sizeof(int) * LDB_MAX_NTHREAD);
-  memset(ldb_maxngen, 0, sizeof(int) * LDB_MAX_NTHREAD);
 
   clock_gettime(CLOCK_MONOTONIC, &start_ts);
   last_ts = start_ts;
 
-  printf("Monitor starts\n");
+  lastWrite = start_ts.tv_sec;
+
+  printf("Monitor thread starts\n");
   
   // Currently busy-running
-  while (1) {
+  while (running) {
     barrier();
     clock_gettime(CLOCK_MONOTONIC, &now);
     barrier();
@@ -175,15 +187,15 @@ void *monitor_main(void *arg) {
       char *rip;
       bool skip_record = false;
       
-      if (rbp <= (char *)0x700000000000 || rbp >= (char *)0x800000000000) {
+      if (rbp <= (char *)0x7f0000000000 || rbp >= (char *)0x800000000000) {
         continue;
       }
 
       // traversing stack frames
-      while (rbp != NULL && ngen > 2) {
+      while (rbp != NULL && ngen > 0) {
         // Invalid RBP with Heuristic threshold
         // Probably dynamic loading...
-        if (rbp <= (char *)0x700000000000 || rbp >= (char *)0x800000000000) {
+        if (rbp <= (char *)0x7f0000000000 || rbp >= (char *)0x800000000000) {
           //printf("\tInvalid rbp = %p, ngen=%d\n", rbp, ngen);
           break;
         }
@@ -200,15 +212,19 @@ void *monitor_main(void *arg) {
         ngen = *((uint64_t *)(rbp + 16));
         rip = (char *)(*((uint64_t *)(rbp + 24)));
 
-        //printf("[%d:%d] rbp=%p, nextrbp=%p, ngen=%lu (thread_ngen=%lu), rip=%p, tag=%u, canary=%u\n",
-         //   tidx, lidx, rbp, (char *)(*((uint64_t *)rbp)), ngen, slock2, rip, tag, canary);
+        //printf("[%d:%d] prbp=%p, rbp=%p, nextrbp=%p, ngen=%lu (thread_ngen=%lu), rip=%p, tag=%u, canary=%u\n",
+        //    tidx, lidx, prbp,rbp, (char *)(*((uint64_t *)rbp)), ngen, slock2, rip, tag, canary);
 
-        // this is the final frame.
-        // no further check
-        if (ngen == 1 || ngen == 2) {
+        // check for the final stack frame
+        if (canary == LDB_CANARY &&
+            tag == 0 &&
+            ngen == 0 &&
+            (char *)(*((uint64_t *)rbp)) == NULL) {
           temp_tag[lidx] = tag;
           temp_ngen[lidx] = ngen;
           temp_rip[lidx] = rip;
+          prbp = rbp;
+          rbp = NULL;
           lidx++;
           break;
         }
@@ -251,8 +267,8 @@ void *monitor_main(void *arg) {
         lidx++;
       }
 
-      // No data collected
-      if (lidx == 0)
+      // No data collected or the stack could not reach the top
+      if (lidx == 0 || rbp != NULL || ngen != 0)
         continue;
 
       // Update latency
@@ -268,6 +284,10 @@ void *monitor_main(void *arg) {
         ldb_latency[tidx][gidx] += elapsed;
         gidx++;
         lidx--;
+      }
+
+      if (gidx > LDB_MAX_CALLDEPTH) {
+        printf("[WARNING] gidx overflow: %d\n", gidx);
       }
 
       // handle dynamic loading
@@ -291,6 +311,9 @@ void *monitor_main(void *arg) {
         gidx++;
         lidx--;
       }
+      if (gidx > LDB_MAX_CALLDEPTH) {
+        printf("[WARNING] gidx overflow: %d\n", gidx);
+      }
       ldb_cnt[tidx] = gidx;
     } // for
 
@@ -298,27 +321,63 @@ void *monitor_main(void *arg) {
     last_ts = now;
   } // while true
 
+  for (int i = 0; i < LDB_MAX_NTHREAD; i++) {
+    free(ldb_tag[i]);
+    free(ldb_ngen[i]);
+    free(ldb_rip[i]);
+    free(ldb_latency[i]);
+  }
+
+  free(ldb_tag);
+  free(ldb_ngen);
+  free(ldb_rip);
+  free(ldb_latency);
+  free(ldb_cnt);
+
+  printf("Monitoring thread exiting...\n");
+
   return NULL;
 }
 
 void *logger_main(void *arg) {
-  FILE *ldb_fout = fopen(LDB_REPORT_OUTPUT, "w");
+  FILE *ldb_fout = fopen(LDB_EVENT_OUTPUT, "w");
+  int eventHead_;
+  int eventTail_;
+  struct timespec now_;
 
-  while (1) {
-    while (eventHead != eventTail) {
-      struct LDBEvent *event = &events[eventHead];
+  printf("Logger thread starts\n");
+
+  pthread_mutex_lock(&mEvent);
+  while (running) {
+    while (running && recordSize() < LDB_EVENT_THRESH &&
+        now_.tv_sec - lastWrite < LDB_EVENT_MIN_INT) {
+      pthread_cond_wait(&cvEvent, &mEvent);
+      clock_gettime(CLOCK_MONOTONIC, &now_);
+    }
+    nWakeup++;
+    eventHead_ = eventHead;
+    eventTail_ = eventTail;
+    pthread_mutex_unlock(&mEvent);
+
+    while (eventHead_ != eventTail_) {
+      LDBEvent *event = &events[eventHead_];
       fprintf(ldb_fout, "%lu.%09lu,%u,%u,%lu,%lu,%p,%lu\n",
           event->ts.tv_sec, event->ts.tv_nsec, event->thread_id, event->tag,
           event->ngen, event->latency, event->rip, event->elapsed);
 
-      barrier();
-      eventHead = (eventHead + 1) % LDB_REPORT_BUF_SIZE;
+      eventHead_ = (eventHead_ + 1) % LDB_EVENT_BUF_SIZE;
     }
 
     fflush(ldb_fout);
-  }
+    pthread_mutex_lock(&mEvent);
+    eventHead = eventHead_;
+    lastWrite = now_.tv_sec;
+  } 
+  pthread_mutex_unlock(&mEvent);
 
   fclose(ldb_fout);
+
+  printf("logger thread exiting... waken up %d times\n", nWakeup);
   return NULL;
 }
 
@@ -326,6 +385,14 @@ void *logger_main(void *arg) {
 void __ldbInit(void) {
   // clear tag
   __ldb_clear_tag();
+
+  // initialize stack
+  char *rbp = get_rbp(); // this is rbp of __ldbInit()
+  rbp = (char *)(*((uint64_t *)rbp)); // this is rbp of main()
+
+  *((uint64_t *)(rbp + 16)) = 0;
+  *((uint64_t *)(rbp + 8)) = (uint64_t)LDB_CANARY << 32;
+  *((uint64_t *)rbp) = 0;
 
   // attach shared memory
   key_t shm_key = ftok("ldb", 65);
@@ -343,18 +410,31 @@ void __ldbInit(void) {
 
   pthread_spin_init(&ldb_shared->ldb_tlock, PTHREAD_PROCESS_SHARED);
 
+  // allocate event buffer
+  events = (LDBEvent *)malloc(LDB_EVENT_BUF_SIZE * sizeof(LDBEvent));
+
+  nWakeup = 0;
+  running = true;
+
   // Launch monitoring thread
-  pthread_t mid;
-  pthread_create(&mid, NULL, &monitor_main, NULL);
+  pthread_create(&monitor_th, NULL, &monitor_main, NULL);
 
   // Launch logger thread
-  pthread_t lid;
-  pthread_create(&lid, NULL, &logger_main, NULL);
+  pthread_create(&logger_th, NULL, &logger_main, NULL);
 }
 
 void __ldbExit(void) {
+  void *ret;
   // Remove main thread's fsbase
   ldb_shared->ldb_thread_info[0].fsbase = NULL;
 
   // Join monitor and destroy spin lock?
+  printf("Main app is exiting...\n");
+  running = false;
+
+  pthread_join(monitor_th, &ret);
+  pthread_cond_broadcast(&cvEvent);
+  pthread_join(logger_th, &ret);
+
+  free(events);
 }

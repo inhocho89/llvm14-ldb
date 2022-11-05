@@ -20,11 +20,6 @@ typedef struct {
     void *param;
 } pthread_param_t;
 
-static inline __attribute__((always_inline)) void reset_ngen() {
-  asm volatile ("movq $0, %%fs:-16 \n\t" ::: "memory");
-  asm volatile ("movq $0, -16(%%rbp) \n\t" ::: "memory");
-}
-
 static inline __attribute__((always_inline)) uint64_t get_ngen() {
   uint64_t ngen;
 
@@ -85,8 +80,17 @@ void *__ldb_thread_start(void *arg) {
   free(arg);
 
   // clear tag
-  reset_ngen();
   __ldb_clear_tag();
+
+  // initialize stack
+  char *rbp = get_rbp(); // this is the rbp of thread main
+
+  // set ngen to 0
+  *((uint64_t *)(rbp + 16)) = 0;
+  // set canary and tag
+  *((uint64_t *)(rbp + 8)) = (uint64_t)LDB_CANARY << 32;
+  // set old RBP
+  *((uint64_t *)rbp) = 0;
 
   printf("New interposed thread is starting... thread ID = %ld\n", syscall(SYS_gettid));
   printf("ngen = %lu, tls rbp = %p, real rbp = %p\n", get_ngen(), get_rbp(), get_real_rbp());
