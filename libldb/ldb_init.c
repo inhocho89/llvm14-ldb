@@ -187,7 +187,7 @@ void *monitor_main(void *arg) {
       char *rip;
       bool skip_record = false;
       
-      if (rbp <= (char *)0x7f0000000000 || rbp >= (char *)0x800000000000) {
+      if (rbp <= (char *)0x700000000000 || rbp >= (char *)0x800000000000) {
         continue;
       }
 
@@ -195,7 +195,7 @@ void *monitor_main(void *arg) {
       while (rbp != NULL && ngen > 0) {
         // Invalid RBP with Heuristic threshold
         // Probably dynamic loading...
-        if (rbp <= (char *)0x7f0000000000 || rbp >= (char *)0x800000000000) {
+        if (rbp <= (char *)0x700000000000 || rbp >= (char *)0x800000000000) {
           //printf("\tInvalid rbp = %p, ngen=%d\n", rbp, ngen);
           break;
         }
@@ -205,6 +205,8 @@ void *monitor_main(void *arg) {
           lidx = 0;
           break;
         }
+
+        barrier();
 
         canary_and_tag = *((uint64_t *)(rbp + 8));
         canary = (uint32_t)(canary_and_tag >> 32);
@@ -229,15 +231,13 @@ void *monitor_main(void *arg) {
           break;
         }
 
-        // check whether stack has been modified
-        if (is_stack_modified(fsbase, slock, slock2)) {
-          lidx = 0;
-          //printf("\tstack mod\n");
-          break;
-        }
-
         // If RIP is dynamically loaded one, skip (we cannot trace anyway)
         if (rip > (char *)0x500000) {
+          if (is_stack_modified(fsbase, slock, slock2)) {
+            lidx = 0;
+            break;
+          }
+          barrier();
           prbp = rbp;
           rbp = (char *)(*((uint64_t *)rbp));
           continue;
@@ -260,6 +260,8 @@ void *monitor_main(void *arg) {
           //printf("\tstack mod\n");
           break;
         }
+
+        barrier();
 
         // rbp: go up!
         prbp = rbp;
