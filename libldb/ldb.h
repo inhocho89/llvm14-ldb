@@ -22,3 +22,7 @@ static inline __attribute__((always_inline)) char *rdfsbase() {
 
   return fsbase;
 }
+
+static inline __attribute__((always_inline)) void __ldb_set_base(char *base) {
+  asm volatile ("movq %0, %%fs:-32 \n\t" :: "r"(base) : "memory");
+}

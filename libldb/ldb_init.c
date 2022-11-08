@@ -392,6 +392,8 @@ void __ldbInit(void) {
   char *rbp = get_rbp(); // this is rbp of __ldbInit()
   rbp = (char *)(*((uint64_t *)rbp)); // this is rbp of main()
 
+  __ldb_set_base(rbp);
+
   *((uint64_t *)(rbp + 16)) = 0;
   *((uint64_t *)(rbp + 8)) = (uint64_t)LDB_CANARY << 32;
   *((uint64_t *)rbp) = 0;

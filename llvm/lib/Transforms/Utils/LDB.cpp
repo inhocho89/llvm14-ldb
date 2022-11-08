@@ -17,6 +17,18 @@ bool llvm::insertLDBGlobals(Module &M) {
     return false;
 
   // declare global variables only for module containing main function
+  Type *BaseTy = Type::getInt64Ty(M.getContext());
+  M.getOrInsertGlobal("__ldb_base", BaseTy, [&] {
+    GlobalVariable *g =
+      new GlobalVariable(M, BaseTy, false, GlobalVariable::ExternalLinkage,
+			 nullptr, "__ldb_base", nullptr,
+			 GlobalVariable::GeneralDynamicTLSModel);
+      g->setInitializer(Constant::getNullValue(BaseTy));
+      g->setDSOLocal(true);
+      g->setAlignment(llvm::Align(8));
+      return g;
+  });
+
   Type *TagTy = Type::getInt64Ty(M.getContext());
   M.getOrInsertGlobal("__ldb_tag", TagTy, [&] {
     GlobalVariable *g =

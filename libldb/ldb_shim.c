@@ -85,6 +85,8 @@ void *__ldb_thread_start(void *arg) {
   // initialize stack
   char *rbp = get_rbp(); // this is the rbp of thread main
 
+  __ldb_set_base(rbp);
+
   // set ngen to 0
   *((uint64_t *)(rbp + 16)) = 0;
   // set canary and tag
