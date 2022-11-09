@@ -119,6 +119,7 @@ void *monitor_main(void *arg) {
   uint32_t **ldb_tag;
   uint64_t **ldb_ngen;
   char ***ldb_rip;
+  char ***ldb_rbp;
   uint64_t **ldb_latency;
   int *ldb_cnt;
 
@@ -129,6 +130,7 @@ void *monitor_main(void *arg) {
   uint32_t temp_tag[LDB_MAX_CALLDEPTH];
   uint64_t temp_ngen[LDB_MAX_CALLDEPTH];
   char *temp_rip[LDB_MAX_CALLDEPTH];
+  char *temp_rbp[LDB_MAX_CALLDEPTH];
 
   struct timespec now;
   uint64_t elapsed;
@@ -140,6 +142,7 @@ void *monitor_main(void *arg) {
   ldb_tag = (uint32_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint32_t *));
   ldb_ngen = (uint64_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint64_t *));
   ldb_rip = (char ***)malloc(LDB_MAX_NTHREAD * sizeof(char **));
+  ldb_rbp = (char ***)malloc(LDB_MAX_NTHREAD * sizeof(char **));
   ldb_latency = (uint64_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint64_t *));
   ldb_cnt = (int *)malloc(LDB_MAX_NTHREAD * sizeof(int));
 
@@ -147,6 +150,7 @@ void *monitor_main(void *arg) {
     ldb_tag[i] = (uint32_t *)malloc(LDB_MAX_CALLDEPTH * sizeof(uint32_t));
     ldb_ngen[i] = (uint64_t *)malloc(LDB_MAX_CALLDEPTH * sizeof(uint64_t));
     ldb_rip[i] = (char **)malloc(LDB_MAX_CALLDEPTH * sizeof(char *));
+    ldb_rbp[i] = (char **)malloc(LDB_MAX_CALLDEPTH * sizeof(char *));
     ldb_latency[i] = (uint64_t *)malloc(LDB_MAX_CALLDEPTH * sizeof(uint64_t));
   }
 
@@ -175,38 +179,36 @@ void *monitor_main(void *arg) {
       pid_t thread_id = ldb_shared->ldb_thread_info[tidx].id;
       char ***fsbase = &(ldb_shared->ldb_thread_info[tidx].fsbase);
       int lidx = 0;
-      char *prbp = NULL;
       char *rbp = *(*fsbase - 1);
+      char *prbp = rbp - 8;
       // use initial rbp as sequence lock
       char *slock = rbp;
       uint64_t slock2 = *(uint64_t *)(*fsbase - 2);
+      char *stack_base = *(*fsbase - 4);
       uint64_t ngen = 99;
       uint64_t canary_and_tag;
       uint32_t tag;
       uint32_t canary;
       char *rip;
-      bool skip_record = false;
       
-      if (rbp <= (char *)0x700000000000 || rbp >= (char *)0x800000000000) {
+      // Heuristic check if rbp is not valid, skip this iteration
+      if (rbp <= (char *)0x7f0000000000 || rbp > stack_base) {
         continue;
       }
 
       // traversing stack frames
-      while (rbp != NULL && ngen > 0) {
-        // Invalid RBP with Heuristic threshold
-        // Probably dynamic loading...
-        if (rbp <= (char *)0x700000000000 || rbp >= (char *)0x800000000000) {
-          //printf("\tInvalid rbp = %p, ngen=%d\n", rbp, ngen);
+      while (rbp != NULL) {
+        // check whether RBP is valid
+        if (rbp <= prbp || rbp > stack_base) {
           break;
         }
 
-        // check whether stack has been modified
+        // check whether stack has been modified and fetch data
+        barrier();
         if (is_stack_modified(fsbase, slock, slock2)) {
           lidx = 0;
           break;
         }
-
-        barrier();
 
         canary_and_tag = *((uint64_t *)(rbp + 8));
         canary = (uint32_t)(canary_and_tag >> 32);
@@ -214,71 +216,41 @@ void *monitor_main(void *arg) {
         ngen = *((uint64_t *)(rbp + 16));
         rip = (char *)(*((uint64_t *)(rbp + 24)));
 
-        //printf("[%d:%d] prbp=%p, rbp=%p, nextrbp=%p, ngen=%lu (thread_ngen=%lu), rip=%p, tag=%u, canary=%u\n",
-        //    tidx, lidx, prbp,rbp, (char *)(*((uint64_t *)rbp)), ngen, slock2, rip, tag, canary);
-
-        // check for the final stack frame
-        if (canary == LDB_CANARY &&
-            tag == 0 &&
-            ngen == 0 &&
-            (char *)(*((uint64_t *)rbp)) == NULL) {
-          temp_tag[lidx] = tag;
-          temp_ngen[lidx] = ngen;
-          temp_rip[lidx] = rip;
-          prbp = rbp;
-          rbp = NULL;
-          lidx++;
+        // check if stack frame is valid
+        if (canary != LDB_CANARY) {
           break;
         }
 
-        // If RIP is dynamically loaded one, skip (we cannot trace anyway)
-        if (rip > (char *)0x500000) {
-          if (is_stack_modified(fsbase, slock, slock2)) {
-            lidx = 0;
-            break;
-          }
-          barrier();
-          prbp = rbp;
-          rbp = (char *)(*((uint64_t *)rbp));
-          continue;
-        }
-
-        // invalid stack frame. halting
-        if (ngen > slock2 || ngen == 0 || rip == NULL || canary != LDB_CANARY) {
-          //printf("\tInvalid stack frame: ngen=%lu, rip=%p, canary=%u\n", ngen, rip, canary);
-//          skip_record = true;
-          break;
-        }
-
+        // all check passed!
+        // store frame info to locals
         temp_tag[lidx] = tag;
         temp_ngen[lidx] = ngen;
         temp_rip[lidx] = rip;
+        temp_rbp[lidx] = rbp;
 
-        // check whether stack has been modified
-        if (is_stack_modified(fsbase, slock, slock2)) {
+        // go up for next frame
+        barrier();
+        if(is_stack_modified(fsbase, slock, slock2)) {
           lidx = 0;
-          //printf("\tstack mod\n");
           break;
         }
 
-        barrier();
-
-        // rbp: go up!
         prbp = rbp;
         rbp = (char *)(*((uint64_t *)rbp));
         lidx++;
       }
 
-      // No data collected or the stack could not reach the top
-      if (lidx == 0 || rbp != NULL || ngen != 0)
+      // No data collected
+      if (lidx == 0)
         continue;
 
       // Update latency
       int gidx = 0;
-      while (gidx < ldb_cnt[tidx] && ldb_ngen[tidx][gidx] != temp_ngen[lidx-1])
-        gidx++;
 
-      skip_record = (gidx >= ldb_cnt[tidx]);
+      while (gidx < ldb_cnt[tidx] && ldb_rbp[tidx][gidx] > temp_rbp[lidx-1]) {
+        ldb_latency[tidx][gidx] += elapsed;
+        gidx++;
+      }
 
       while (gidx < ldb_cnt[tidx] && lidx > 0) {
         if (ldb_ngen[tidx][gidx] != temp_ngen[lidx-1])
@@ -292,12 +264,7 @@ void *monitor_main(void *arg) {
         printf("[WARNING] gidx overflow: %d\n", gidx);
       }
 
-      // handle dynamic loading
-      if (skip_record) {
-        gidx = ldb_cnt[tidx];
-      }
-
-      // Record data collected
+      // Record finished function call
       for (int i = gidx; i < ldb_cnt[tidx]; ++i) {
         record(now, thread_id, ldb_tag[tidx][i], ldb_ngen[tidx][i], ldb_latency[tidx][i],
             ldb_rip[tidx][i], elapsed);
@@ -309,13 +276,16 @@ void *monitor_main(void *arg) {
         ldb_ngen[tidx][gidx] = temp_ngen[lidx - 1];
         ldb_latency[tidx][gidx] = 0;
         ldb_rip[tidx][gidx] = temp_rip[lidx - 1];
+        ldb_rbp[tidx][gidx] = temp_rbp[lidx - 1];
 
         gidx++;
         lidx--;
       }
+
       if (gidx > LDB_MAX_CALLDEPTH) {
         printf("[WARNING] gidx overflow: %d\n", gidx);
       }
+
       ldb_cnt[tidx] = gidx;
     } // for
 
@@ -327,12 +297,14 @@ void *monitor_main(void *arg) {
     free(ldb_tag[i]);
     free(ldb_ngen[i]);
     free(ldb_rip[i]);
+    free(ldb_rbp[i]);
     free(ldb_latency[i]);
   }
 
   free(ldb_tag);
   free(ldb_ngen);
   free(ldb_rip);
+  free(ldb_rbp);
   free(ldb_latency);
   free(ldb_cnt);
 
