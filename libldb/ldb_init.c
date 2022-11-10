@@ -20,8 +20,6 @@
 #define LDB_EVENT_MIN_INT 10
 #define LDB_EVENT_OUTPUT "ldb.data"
 
-#define barrier()       asm volatile("" ::: "memory")
-
 static ldb_shmseg *ldb_shared;
 static pthread_t monitor_th;
 static pthread_t logger_th;

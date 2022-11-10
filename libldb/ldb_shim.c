@@ -70,6 +70,7 @@ void __ldb_put_tidx(int tidx) {
   ldb_shared->ldb_nthread--;
 }
 
+/* pthread-related functions */
 void *__ldb_thread_start(void *arg) {
   void *ret;
   int tidx;
@@ -96,8 +97,10 @@ void *__ldb_thread_start(void *arg) {
   printf("ngen = %lu, tls rbp = %p, real rbp = %p\n", get_ngen(), get_rbp(), get_real_rbp());
 
   // attach shared memory
-  int shmid = shmget(SHM_KEY, sizeof(ldb_shmseg), 0666);
-  ldb_shared = shmat(shmid, NULL, 0);
+  if (ldb_shared == NULL) {
+    int shmid = shmget(SHM_KEY, sizeof(ldb_shmseg), 0666);
+    ldb_shared = shmat(shmid, NULL, 0);
+  }
 
   // start tracking
   pthread_spin_lock(&(ldb_shared->ldb_tlock));
@@ -114,8 +117,6 @@ void *__ldb_thread_start(void *arg) {
   pthread_spin_lock(&(ldb_shared->ldb_tlock));
   __ldb_put_tidx(tidx);
   pthread_spin_unlock(&(ldb_shared->ldb_tlock));
-
-  shmdt(ldb_shared);
 
   return ret;
 }
@@ -144,7 +145,23 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     return real_pthread_create(thread, attr, &__ldb_thread_start, worker_params);
 }
 
-/* pthread-related functions */
+int real_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
+                          void *(*start_routine) (void *), void *arg) {
+    char *error;
+    int (*real_pthread_create_)(pthread_t *thread, const pthread_attr_t *attr,
+                          void *(*start_routine) (void *), void *arg);
+
+    real_pthread_create_ = dlsym(RTLD_NEXT, "pthread_create");
+    if( (error = dlerror()) != NULL) {
+        fputs(error, stderr);
+        return 0;
+    }
+
+    printf("real_pthread_create!!\n");
+
+    return real_pthread_create_(thread, attr, start_routine, arg);
+}
+
 int pthread_mutex_lock(pthread_mutex_t *mutex) {
   char *error;
   int (*real_pthread_mutex_lock)(pthread_mutex_t *m);

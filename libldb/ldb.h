@@ -4,6 +4,8 @@
 #define SHM_KEY 401916
 #define LDB_MAX_NTHREAD 128
 
+#define barrier()       asm volatile("" ::: "memory")
+
 typedef struct {
   pid_t id;
   char **fsbase;
