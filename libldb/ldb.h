@@ -1,11 +1,14 @@
 #pragma once
 #include <pthread.h>
 
+#define SHM_KEY 401916
 #define LDB_MAX_NTHREAD 128
 
 typedef struct {
   pid_t id;
   char **fsbase;
+  char *stackbase;
+  char pad[8];
 } ldb_thread_info_t;
 
 typedef struct {
@@ -21,8 +24,4 @@ static inline __attribute__((always_inline)) char *rdfsbase() {
   asm volatile ("rdfsbase %0 \n\t" : "=r"(fsbase) :: "memory");
 
   return fsbase;
-}
-
-static inline __attribute__((always_inline)) void __ldb_set_base(char *base) {
-  asm volatile ("movq %0, %%fs:-32 \n\t" :: "r"(base) : "memory");
 }

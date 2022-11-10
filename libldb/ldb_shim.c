@@ -85,8 +85,6 @@ void *__ldb_thread_start(void *arg) {
   // initialize stack
   char *rbp = get_rbp(); // this is the rbp of thread main
 
-  __ldb_set_base(rbp);
-
   // set ngen to 0
   *((uint64_t *)(rbp + 16)) = 0;
   // set canary and tag
@@ -98,8 +96,7 @@ void *__ldb_thread_start(void *arg) {
   printf("ngen = %lu, tls rbp = %p, real rbp = %p\n", get_ngen(), get_rbp(), get_real_rbp());
 
   // attach shared memory
-  key_t shm_key = ftok("ldb", 65);
-  int shmid = shmget(shm_key, sizeof(ldb_shmseg), 0644|IPC_CREAT);
+  int shmid = shmget(SHM_KEY, sizeof(ldb_shmseg), 0666);
   ldb_shared = shmat(shmid, NULL, 0);
 
   // start tracking
@@ -107,13 +104,18 @@ void *__ldb_thread_start(void *arg) {
   tidx = __ldb_get_tidx();
   ldb_shared->ldb_thread_info[tidx].id = syscall(SYS_gettid);
   ldb_shared->ldb_thread_info[tidx].fsbase = (char **)(rdfsbase());
+  ldb_shared->ldb_thread_info[tidx].stackbase = rbp;
   pthread_spin_unlock(&(ldb_shared->ldb_tlock));
 
+  // execute real thread
   ret = real_thread_params.worker_func(real_thread_params.param);
 
+  // stop tracking
   pthread_spin_lock(&(ldb_shared->ldb_tlock));
   __ldb_put_tidx(tidx);
   pthread_spin_unlock(&(ldb_shared->ldb_tlock));
+
+  shmdt(ldb_shared);
 
   return ret;
 }

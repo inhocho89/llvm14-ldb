@@ -178,19 +178,19 @@ void *monitor_main(void *arg) {
 
       pid_t thread_id = ldb_shared->ldb_thread_info[tidx].id;
       char ***fsbase = &(ldb_shared->ldb_thread_info[tidx].fsbase);
+      char *stack_base = ldb_shared->ldb_thread_info[tidx].stackbase;
       int lidx = 0;
       char *rbp = *(*fsbase - 1);
+      uint64_t slock2 = *(uint64_t *)(*fsbase - 2);
       char *prbp = rbp - 8;
       // use initial rbp as sequence lock
       char *slock = rbp;
-      uint64_t slock2 = *(uint64_t *)(*fsbase - 2);
-      char *stack_base = *(*fsbase - 4);
       uint64_t ngen = 99;
       uint64_t canary_and_tag;
       uint32_t tag;
       uint32_t canary;
       char *rip;
-      
+
       // Heuristic check if rbp is not valid, skip this iteration
       if (rbp <= (char *)0x7f0000000000 || rbp > stack_base) {
         continue;
@@ -291,6 +291,11 @@ void *monitor_main(void *arg) {
 
     nupdate++;
     last_ts = now;
+/*
+    if (elapsed < 1000) {
+      __time_delay_us(1);
+    }
+*/
   } // while true
 
   for (int i = 0; i < LDB_MAX_NTHREAD; i++) {
@@ -364,16 +369,12 @@ void __ldbInit(void) {
   char *rbp = get_rbp(); // this is rbp of __ldbInit()
   rbp = (char *)(*((uint64_t *)rbp)); // this is rbp of main()
 
-  __ldb_set_base(rbp);
-
   *((uint64_t *)(rbp + 16)) = 0;
   *((uint64_t *)(rbp + 8)) = (uint64_t)LDB_CANARY << 32;
   *((uint64_t *)rbp) = 0;
 
   // attach shared memory
-  key_t shm_key = ftok("ldb", 65);
-  int shmid = shmget(shm_key, sizeof(ldb_shmseg), 0644|IPC_CREAT);
-
+  int shmid = shmget(SHM_KEY, sizeof(ldb_shmseg), 0666 | IPC_CREAT);
   ldb_shared = shmat(shmid, NULL, 0);
 
   memset(ldb_shared, 0, sizeof(ldb_thread_info_t) * LDB_MAX_NTHREAD);
@@ -381,6 +382,7 @@ void __ldbInit(void) {
   // Set main thread's fsbase
   ldb_shared->ldb_thread_info[0].id = syscall(SYS_gettid);
   ldb_shared->ldb_thread_info[0].fsbase = (char **)(rdfsbase());
+  ldb_shared->ldb_thread_info[0].stackbase = rbp;
   ldb_shared->ldb_nthread = 1;
   ldb_shared->ldb_max_idx = 1;
 
@@ -412,5 +414,6 @@ void __ldbExit(void) {
   pthread_cond_broadcast(&cvEvent);
   pthread_join(logger_th, &ret);
 
+  shmdt(ldb_shared);
   free(events);
 }
