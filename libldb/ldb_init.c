@@ -15,16 +15,19 @@
 
 #define CYCLES_PER_US 2992
 #define LDB_MAX_CALLDEPTH 1024
-#define LDB_EVENT_BUF_SIZE 200000
+#define LDB_EVENT_BUF_SIZE 400000
 #define LDB_EVENT_THRESH 100000
 #define LDB_EVENT_MIN_INT 10
 #define LDB_EVENT_OUTPUT "ldb.data"
+
+#define LDB_MONITOR_PERIOD 0
 
 static ldb_shmseg *ldb_shared;
 static pthread_t monitor_th;
 static pthread_t logger_th;
 static bool running;
-static int nWakeup;
+static uint64_t nWakeup;
+static uint64_t nIgnored;
 
 typedef struct {
   struct timespec ts;
@@ -53,7 +56,7 @@ static void record(struct timespec ts_, pid_t tid_, uint32_t tag_,
 
   // If queue becomes full, ignore datapoint.
   if ((eventTail + 1) % LDB_EVENT_BUF_SIZE == eventHead) {
-    fprintf(stderr, "Warning: data point was ignored\n");
+    nIgnored++;
     return;
   }
 
@@ -289,11 +292,12 @@ void *monitor_main(void *arg) {
 
     nupdate++;
     last_ts = now;
-/*
-    if (elapsed < 1000) {
-      __time_delay_us(1);
+
+#if LDB_MONITOR_PERIOD > 0
+    if (elapsed < LDB_MONITOR_PERIOD * 1000) {
+      __time_delay_us(LDB_MONITOR_PERIOD - elapsed / 1000);
     }
-*/
+#endif
   } // while true
 
   for (int i = 0; i < LDB_MAX_NTHREAD; i++) {
@@ -311,7 +315,7 @@ void *monitor_main(void *arg) {
   free(ldb_latency);
   free(ldb_cnt);
 
-  printf("Monitoring thread exiting...\n");
+  printf("Monitoring thread exiting... %lu datapoints ignored.\n", nIgnored);
 
   return NULL;
 }
@@ -354,7 +358,7 @@ void *logger_main(void *arg) {
 
   fclose(ldb_fout);
 
-  printf("logger thread exiting... waken up %d times\n", nWakeup);
+  printf("logger thread exiting... waken up %lu times\n", nWakeup);
   return NULL;
 }
 
@@ -390,6 +394,7 @@ void __ldbInit(void) {
   events = (LDBEvent *)malloc(LDB_EVENT_BUF_SIZE * sizeof(LDBEvent));
 
   nWakeup = 0;
+  nIgnored = 0;
   running = true;
 
   // Launch monitoring thread
