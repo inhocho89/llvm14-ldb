@@ -2,8 +2,8 @@ ROOT_PATH=../..
 CC = $(ROOT_PATH)/build/bin/clang
 LDBINIT = $(ROOT_PATH)/libldb/ldb_init.o
 
-LDB_LDFLAGS = -g -fdebug-default-version=3 -fno-optimize-sibling-calls -fno-omit-frame-pointer
-LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-optimize-sibling-calls -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb
+LDB_LDFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer
+LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb
 
 memcached_src = memcached.c hash.c jenkins_hash.c murmur3_hash.c slabs.c items.c assoc.c \
 								thread.c daemon.c stats_prefix.c util.c cache.c bipbuffer.c base64.c logger.c \

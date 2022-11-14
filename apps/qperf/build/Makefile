@@ -5,8 +5,8 @@ RANLIB=/usr/bin/ranlib
 
 LDBINIT = $(ROOT_PATH)/libldb/ldb_init.o
 
-LDB_LDFLAGS = -g -fdebug-default-version=3 -fno-optimize-sibling-calls -fno-omit-frame-pointer
-LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-optimize-sibling-calls -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb
+LDB_LDFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer
+LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb
 
 quicly_src = frame.c cc-reno.c cc-cubic.c cc-pico.c defaults.c local_cid.c loss.c quicly.c \
 						 ranges.c rate.c recvstate.c remote_cid.c retire_cid.c sendstate.c sentmap.c \

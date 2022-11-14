@@ -145,23 +145,6 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     return real_pthread_create(thread, attr, &__ldb_thread_start, worker_params);
 }
 
-int real_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
-                          void *(*start_routine) (void *), void *arg) {
-    char *error;
-    int (*real_pthread_create_)(pthread_t *thread, const pthread_attr_t *attr,
-                          void *(*start_routine) (void *), void *arg);
-
-    real_pthread_create_ = dlsym(RTLD_NEXT, "pthread_create");
-    if( (error = dlerror()) != NULL) {
-        fputs(error, stderr);
-        return 0;
-    }
-
-    printf("real_pthread_create!!\n");
-
-    return real_pthread_create_(thread, attr, start_routine, arg);
-}
-
 int pthread_mutex_lock(pthread_mutex_t *mutex) {
   char *error;
   int (*real_pthread_mutex_lock)(pthread_mutex_t *m);

@@ -2,8 +2,8 @@ ROOT_PATH=../../llvm14-ldb
 CC = $(ROOT_PATH)/build/bin/clang
 LDBINIT = $(ROOT_PATH)/libldb/ldb_init.o
 
-LDB_LDFLAGS = -g -fdebug-default-version=3 -fno-optimize-sibling-calls -fno-omit-frame-pointer
-LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-optimize-sibling-calls -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb
+LDB_LDFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer
+LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb
 
 server_src = adlist.c quicklist.c ae.c anet.c dict.c server.c sds.c zmalloc.c lzf_c.c lzf_d.c pqsort.c zipmap.c sha1.c \
 						 ziplist.c release.c networking.c util.c object.c db.c replication.c rdb.c t_string.c t_list.c t_set.c \

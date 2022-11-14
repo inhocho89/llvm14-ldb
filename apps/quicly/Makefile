@@ -7,8 +7,8 @@ RANLIB=/usr/bin/ranlib
 
 LDBINIT = $(ROOT_PATH)/libldb/ldb_init.o
 
-LDB_LDFLAGS = -g -fdebug-default-version=3 -fno-optimize-sibling-calls -fno-omit-frame-pointer
-LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-optimize-sibling-calls -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb
+LDB_LDFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer
+LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb
 
 QUICLY_FLAGS = -I./deps/klib -I./deps/picotls/include -I./quicly/deps/picotest -I./include \
 							 -I./ -D_GNU_SOURCE -pthread -std=c99 -Wall -g -DQUICLY_USE_TRACER=1 -O2 -MD
