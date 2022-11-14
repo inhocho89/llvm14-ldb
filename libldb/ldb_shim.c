@@ -176,21 +176,69 @@ int pthread_spin_lock(pthread_spinlock_t *lock) {
 
   return real_pthread_spin_lock(lock);
 }
-/*
+
+int pthread_cond_broadcast(pthread_cond_t *cond) {
+  char *error;
+	static int (*real_pthread_cond_broadcast)(pthread_cond_t *);
+
+	if (!real_pthread_cond_broadcast) {
+	  real_pthread_cond_broadcast = dlsym(RTLD_NEXT, "pthread_cond_broadcast");
+		if ((error = dlerror()) != NULL) {
+		  fputs(error, stderr);
+			return 0;
+		}
+	}
+
+	return real_pthread_cond_broadcast(cond);
+}
+
+int pthread_cond_signal(pthread_cond_t *cond) {
+  char *error;
+	static int (*real_pthread_cond_signal)(pthread_cond_t *);
+
+	if (!real_pthread_cond_signal) {
+	  real_pthread_cond_signal = dlsym(RTLD_NEXT, "pthread_cond_signal");
+		if ((error = dlerror()) != NULL) {
+		  fputs(error, stderr);
+			return 0;
+		}
+	}
+
+	return real_pthread_cond_signal(cond);
+}
+
 int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex) {
   char *error;
-  int (*real_pthread_cond_wait)(pthread_cond_t *, pthread_mutex_t *);
-  int ret;
+  static int (*real_pthread_cond_wait)(pthread_cond_t *, pthread_mutex_t *);
 
-  real_pthread_cond_wait = dlsym(RTLD_NEXT, "pthread_cond_wait");
-  if ((error = dlerror()) != NULL) {
-    fputs(error, stderr);
-    return 0;
+  if (!real_pthread_cond_wait) {
+    real_pthread_cond_wait = dlsym(RTLD_NEXT, "pthread_cond_wait");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return 0;
+    }
   }
 
-  ret = real_pthread_cond_wait(cond, mutex);
-  return ret;
-}*/
+  return real_pthread_cond_wait(cond, mutex);
+}
+
+int pthread_cond_timedwait(pthread_cond_t *cond,
+                           pthread_mutex_t *mutex,
+                           const struct timespec *abstime) {
+  char *error;
+	static int (*real_pthread_cond_timedwait)(pthread_cond_t *, pthread_mutex_t *,
+	                                          const struct timespec *);
+
+  if (!real_pthread_cond_timedwait) {
+	  real_pthread_cond_timedwait = dlsym(RTLD_NEXT, "pthread_cond_timedwait");
+		if ((error = dlerror()) != NULL) {
+		  fputs(error, stderr);
+			return 0;
+		}
+	}
+
+	return real_pthread_cond_timedwait(cond, mutex, abstime);
+}
 
 /* memory-related functions */
 void *memset(void *str, int c, size_t n) {
@@ -239,7 +287,6 @@ void *malloc(size_t size) {
 }
 
 /* other useful functions */
-
 int rand(void) {
   char *error;
   static int (*real_rand)(void);
