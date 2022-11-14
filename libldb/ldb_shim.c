@@ -124,13 +124,15 @@ void *__ldb_thread_start(void *arg) {
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
                           void *(*start_routine) (void *), void *arg) {
     char *error;
-    int (*real_pthread_create)(pthread_t *thread, const pthread_attr_t *attr,
-                          void *(*start_routine) (void *), void *arg);
+    static int (*real_pthread_create)(pthread_t *thread, const pthread_attr_t *attr,
+		    void *(*start_routine) (void *), void *arg);
 
-    real_pthread_create = dlsym(RTLD_NEXT, "pthread_create");
-    if( (error = dlerror()) != NULL) {
-        fputs(error, stderr);
-        return 0;
+    if (!real_pthread_create) {
+      real_pthread_create = dlsym(RTLD_NEXT, "pthread_create");
+      if( (error = dlerror()) != NULL) {
+          fputs(error, stderr);
+          return 0;
+      }
     }
 
     pthread_param_t *worker_params;
@@ -147,12 +149,14 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 
 int pthread_mutex_lock(pthread_mutex_t *mutex) {
   char *error;
-  int (*real_pthread_mutex_lock)(pthread_mutex_t *m);
+  static int (*real_pthread_mutex_lock)(pthread_mutex_t *m);
 
-  real_pthread_mutex_lock = dlsym(RTLD_NEXT, "pthread_mutex_lock");
-  if ((error = dlerror()) != NULL) {
-    fputs(error, stderr);
-    return 0;
+  if (!real_pthread_mutex_lock) {
+    real_pthread_mutex_lock = dlsym(RTLD_NEXT, "pthread_mutex_lock");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return 0;
+    }
   }
 
   return real_pthread_mutex_lock(mutex);
@@ -160,12 +164,14 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
 
 int pthread_spin_lock(pthread_spinlock_t *lock) {
   char *error;
-  int (*real_pthread_spin_lock)(pthread_spinlock_t *);
+  static int (*real_pthread_spin_lock)(pthread_spinlock_t *);
 
-  real_pthread_spin_lock = dlsym(RTLD_NEXT, "pthread_spin_lock");
-  if ((error = dlerror()) != NULL) {
-    fputs(error, stderr);
-    return 0;
+  if (!real_pthread_spin_lock) {
+    real_pthread_spin_lock = dlsym(RTLD_NEXT, "pthread_spin_lock");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return 0;
+    }
   }
 
   return real_pthread_spin_lock(lock);
@@ -189,12 +195,14 @@ int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex) {
 /* memory-related functions */
 void *memset(void *str, int c, size_t n) {
   char *error;
-  void *(*real_memset)(void *, int, size_t);
+  static void *(*real_memset)(void *, int, size_t);
 
-  real_memset = dlsym(RTLD_NEXT, "memset");
-  if ((error = dlerror()) != NULL) {
-    fputs(error, stderr);
-    return NULL;
+  if (!real_memset) {
+    real_memset = dlsym(RTLD_NEXT, "memset");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return NULL;
+    }
   }
 
   return real_memset(str, c, n);
@@ -202,12 +210,14 @@ void *memset(void *str, int c, size_t n) {
 
 void *memcpy(void *dest, const void *src, size_t len) {
   char *error;
-  void *(*real_memcpy)(void *, const void *, size_t);
+  static void *(*real_memcpy)(void *, const void *, size_t);
 
-  real_memcpy = dlsym(RTLD_NEXT, "memcpy");
-  if ((error = dlerror()) != NULL) {
-    fputs(error, stderr);
-    return NULL;
+  if (!real_memcpy) {
+    real_memcpy = dlsym(RTLD_NEXT, "memcpy");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return NULL;
+    }
   }
 
   return real_memcpy(dest, src, len);
@@ -215,12 +225,14 @@ void *memcpy(void *dest, const void *src, size_t len) {
 
 void *malloc(size_t size) {
   char *error;
-  void *(*real_malloc)(size_t);
+  static void *(*real_malloc)(size_t);
 
-  real_malloc = dlsym(RTLD_NEXT, "malloc");
-  if ((error = dlerror()) != NULL) {
-    fputs(error, stderr);
-    return NULL;
+  if (!real_malloc) {
+    real_malloc = dlsym(RTLD_NEXT, "malloc");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return NULL;
+    }
   }
 
   return real_malloc(size);
@@ -230,12 +242,14 @@ void *malloc(size_t size) {
 
 int rand(void) {
   char *error;
-  int (*real_rand)(void);
+  static int (*real_rand)(void);
 
-  real_rand = dlsym(RTLD_NEXT, "rand");
-  if ((error = dlerror()) != NULL) {
-    fputs(error, stderr);
-    return 0;
+  if (!real_rand) {
+    real_rand = dlsym(RTLD_NEXT, "rand");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return 0;
+    }
   }
 
   return real_rand();
