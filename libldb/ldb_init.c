@@ -325,8 +325,14 @@ void *logger_main(void *arg) {
   int eventHead_;
   int eventTail_;
   struct timespec now_;
+  char cmd_buf[128];
 
   printf("Logger thread starts\n");
+
+  // store maps
+  pid_t pid_self = syscall(SYS_getpid);
+  sprintf(cmd_buf, "cat /proc/%d/maps > maps.data", pid_self);
+  system(cmd_buf);
 
   pthread_mutex_lock(&mEvent);
   while (running) {
@@ -350,6 +356,7 @@ void *logger_main(void *arg) {
     }
 
     fflush(ldb_fout);
+    system(cmd_buf);
     pthread_mutex_lock(&mEvent);
     eventHead = eventHead_;
     lastWrite = now_.tv_sec;
