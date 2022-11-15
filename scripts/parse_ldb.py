@@ -12,12 +12,13 @@ import sys
 import csv
 import copy
 import math
+import os
 
 # If pyelftools is not installed, the example can also run from the root or
 # examples/ dir of the source distribution.
 sys.path[0:0] = ['.', '..']
 
-from elftools.common.utils import bytes2str
+from elftools.common.py3compat import bytes2str
 from elftools.dwarf.descriptions import describe_form_class
 from elftools.elf.elffile import ELFFile
 
@@ -83,13 +84,12 @@ def decode_file_line(dwarfinfo, address):
                 prevstate = None
             else:
                 prevstate = entry.state
-    return None, None, None
+    return None, 0, 0
 
-def generate_stats(executable, ldb_raw):
-
-    print('executable: {}'.format(executable))
-    print('LDB data: {}'.format(ldb_raw))
-    latencies = {}
+def parse_elf(executable):
+    if not os.path.exists(executable):
+        print('  Cannot find executable: {}'.format(executable))
+        return None
 
     with open(executable, 'rb') as e:
         # get elf and dwarf information
@@ -97,89 +97,113 @@ def generate_stats(executable, ldb_raw):
 
         if not elffile.has_dwarf_info():
             print('  file has no debugging information')
-            return
+            return None
 
         dwarfinfo = elffile.get_dwarf_info()
 
-        # collect latency informations
-        with open(ldb_raw, 'r') as ldb_raw_file:
-            csv_reader = csv.reader(ldb_raw_file, delimiter=',')
-            for row in csv_reader:
-                if (len(row) != 7):
-                    continue
-                #timestamp = int(row[0])
-                #thread_id = int(row[1])
-                #tag = int(row[2])
-                #ngen = int(row[3])
-                latency = float(row[4]) / 1000.0
-                pc = int(row[5],0)
+        return dwarfinfo
 
-                if pc in latencies:
-                    latencies[pc].append(latency)
-                else:
-                    latencies[pc] = [latency]
+def parse_maps():
+    if not os.path.exists("maps.data"):
+        return None
 
-        latencies_ordered = []
-        for pc, larr in latencies.items():
-            pc -= 5
-            larr.sort()
-            N = len(larr)
-            latencies_ordered.append({'pc': pc, 'num_samples': N, 'median': larr[int(N * 0.5)],
-                '90p': larr[int(N * 0.9)], '99p': larr[int(N * 0.99)], '999p': larr[int(N * 0.999)]})
-
-        def dist_distance(e):
-            return e['999p'] - e['median']
-
-        latencies_ordered.sort(key=dist_distance, reverse=True)
-
-        for e in latencies_ordered:
-            fname, line, col = decode_file_line(dwarfinfo, e['pc'])
-            if fname == None:
+    maps_arr = []
+    with open("maps.data", 'r') as maps_file:
+        csv_reader = csv.reader(maps_file, skipinitialspace=True, delimiter=' ')
+        for row in csv_reader:
+            if len(row) < 6:
                 continue
+    
+            ranges = row[0].split('-')
+            rg_start = int(ranges[0], 16)
+            rg_finish = int(ranges[1], 16)
+            #perms = row[1]
+            offset = int(row[2], 16)
+            #dev = row[3]
+            #inode = row[4]
+            pathname = ' '.join(row[5:])
 
-            print('{}:{:d}:{:d} (pc={})'.format(bytes2str(fname), line, col, hex(e['pc'])))
-            print('    num_samples: {:d}'.format(e['num_samples']))
-            print('    median: {:.4f}'.format(e['median']))
-            print('    90p: {:.4f}'.format(e['90p']))
-            print('    99p: {:.4f}'.format(e['99p']))
-            print('    99.9p: {:.4f}'.format(e['999p']))
+            maps_arr.append({'start': rg_start,
+                             'finish': rg_finish,
+                             'offset': offset,
+                             'pathname': pathname})
 
-        
-        """
-        # report latency distributions
-        for pc, larr in latencies.items():
-            # previous instruction
-            pc -= 5
-            larr.sort()
-            N = len(larr)
-            fname, line, col = decode_file_line(dwarfinfo, pc)
-            if fname == None:
+    return maps_arr
+  
+def decode_dynamic(mapsinfo, address):
+    for mi in mapsinfo:
+        if address >= mi['start'] and address < mi['finish']:
+            return mi['pathname'], mi['offset'] + (address - mi['start'])
+
+    return None, 0
+
+def get_finfo(dwarfinfo, mapsinfo, address):
+    if dwarfinfo == None:
+        return "???"
+
+    fname, line, col = decode_file_line(dwarfinfo, address)
+
+    if fname != None:
+        return "{}:{:d}:{:d}".format(bytes2str(fname), line, col)
+
+    if mapsinfo == None:
+        return "???"
+
+    fname, offset = decode_dynamic(mapsinfo, address)
+
+    if fname != None:
+        return "{}+{}".format(fname, hex(offset))
+
+    return "???"
+
+def generate_stats(executable, ldb_raw):
+    print('executable: {}'.format(executable))
+    print('LDB data: {}'.format(ldb_raw))
+    latencies = {}
+
+    dwarfinfo = parse_elf(executable)
+    mapsinfo = parse_maps()
+
+    # collect latency informations
+    with open(ldb_raw, 'r') as ldb_raw_file:
+        csv_reader = csv.reader(ldb_raw_file, delimiter=',')
+        for row in csv_reader:
+            if (len(row) != 7):
                 continue
-            print('{}:{:d}:{:d} (pc={})'.format(bytes2str(fname), line, col, hex(pc)))
-            print('  num_samples: {:d}'.format(N))
-            print('  median: {:.4f}'.format(larr[int(N * 0.5)]))
-            print('  90p: {:.4f}'.format(larr[int(N * 0.9)]))
-            print('  99p: {:.4f}'.format(larr[int(N * 0.99)]))
-            print('  99.9p: {:.4f}'.format(larr[int(N * 0.999)]))
-        """
+            #timestamp = int(row[0])
+            #thread_id = int(row[1])
+            #tag = int(row[2])
+            #ngen = int(row[3])
+            latency = float(row[4]) / 1000.0
+            pc = int(row[5],0)
 
-        """
-        for pc, larr in latencies.items():
-            pc -= 5
-            avg = larr[0]
-            avg2 = larr[0] * larr[0]
-            var = 0.0
-            N = len(larr)
+            if pc in latencies:
+                latencies[pc].append(latency)
+            else:
+                latencies[pc] = [latency]
 
-            fname, line, col = decode_file_line(dwarfinfo, pc)
+    latencies_ordered = []
+    for pc, larr in latencies.items():
+        pc -= 5
+        larr.sort()
+        N = len(larr)
+        latencies_ordered.append({'pc': pc, 'num_samples': N, 'median': larr[int(N * 0.5)],
+            '90p': larr[int(N * 0.9)], '99p': larr[int(N * 0.99)], '999p': larr[int(N * 0.999)]})
 
-            for i in range(1, N):
-                if larr[i] > avg + 2 * math.sqrt(var):
-                    print('{}:{:d}:{:d} (pc={}) took {:f} us (avg = {:f} us)'.format(bytes2str(fname), line, col, hex(pc), larr[i], avg))
-                avg = 0.8 * avg + 0.2 * larr[i]
-                avg2 = 0.8 * avg2 + 0.2 * larr[i] * larr[i]
-                var = avg2 - avg * avg
-        """
+    def dist_distance(e):
+        return e['999p'] - e['median']
+
+    latencies_ordered.sort(key=dist_distance, reverse=True)
+
+    for e in latencies_ordered:
+        finfo = get_finfo(dwarfinfo, mapsinfo, e['pc'])
+
+        print('{} (pc={})'.format(finfo, hex(e['pc'])))
+        print('    num_samples: {:d}'.format(e['num_samples']))
+        print('    median: {:.4f}'.format(e['median']))
+        print('    90p: {:.4f}'.format(e['90p']))
+        print('    99p: {:.4f}'.format(e['99p']))
+        print('    99.9p: {:.4f}'.format(e['999p']))
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
