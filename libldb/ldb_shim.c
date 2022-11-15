@@ -286,6 +286,20 @@ void *malloc(size_t size) {
   return real_malloc(size);
 }
 
+void free(void *ptr) {
+  char *error;
+  static void (*real_free)(void *);
+
+  if (!real_free) {
+    real_free = dlsym(RTLD_NEXT, "free");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return;
+    }
+  }
+  return real_free(ptr);
+}
+
 /* other useful functions */
 int rand(void) {
   char *error;
