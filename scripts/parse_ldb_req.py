@@ -213,9 +213,9 @@ def parse_ldb(executable, mreq):
         return e['tsc']
 
     filter_req.sort(key=filter_req_sort)
-    return filter_req, thread_list, min_tsc
+    return filter_req, thread_list, min_tsc, max_tsc
 
-def parse_perf(thread_list, min_tsc):
+def parse_perf(thread_list, min_tsc, max_tsc):
     print('Perf Data: perf.data')
     if not os.path.exists("perf.data"):
         print('  Cannot find perf.data')
@@ -276,8 +276,8 @@ def generate_stats(executable, mreq):
     print('executable: {}'.format(executable))
     print("req ID = {:d}".format(mreq))
 
-    filter_req, thread_list, min_tsc = parse_ldb(executable, mreq)
-    row_in_time = parse_perf(thread_list, min_tsc)
+    filter_req, thread_list, min_tsc, max_tsc = parse_ldb(executable, mreq)
+    row_in_time = parse_perf(thread_list, min_tsc, max_tsc)
 
     ldb_i = 0
     perf_i = 0
