@@ -127,7 +127,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     static int (*real_pthread_create)(pthread_t *thread, const pthread_attr_t *attr,
 		    void *(*start_routine) (void *), void *arg);
 
-    if (!real_pthread_create) {
+    if (unlikely(!real_pthread_create)) {
       real_pthread_create = dlsym(RTLD_NEXT, "pthread_create");
       if( (error = dlerror()) != NULL) {
           fputs(error, stderr);
@@ -151,7 +151,7 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
   char *error;
   static int (*real_pthread_mutex_lock)(pthread_mutex_t *m);
 
-  if (!real_pthread_mutex_lock) {
+  if (unlikely(!real_pthread_mutex_lock)) {
     real_pthread_mutex_lock = dlsym(RTLD_NEXT, "pthread_mutex_lock");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
@@ -166,7 +166,7 @@ int pthread_spin_lock(pthread_spinlock_t *lock) {
   char *error;
   static int (*real_pthread_spin_lock)(pthread_spinlock_t *);
 
-  if (!real_pthread_spin_lock) {
+  if (unlikely(!real_pthread_spin_lock)) {
     real_pthread_spin_lock = dlsym(RTLD_NEXT, "pthread_spin_lock");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
@@ -179,24 +179,24 @@ int pthread_spin_lock(pthread_spinlock_t *lock) {
 
 int pthread_cond_broadcast(pthread_cond_t *cond) {
   char *error;
-	static int (*real_pthread_cond_broadcast)(pthread_cond_t *);
+  static int (*real_pthread_cond_broadcast)(pthread_cond_t *);
 
-	if (!real_pthread_cond_broadcast) {
-	  real_pthread_cond_broadcast = dlsym(RTLD_NEXT, "pthread_cond_broadcast");
-		if ((error = dlerror()) != NULL) {
-		  fputs(error, stderr);
-			return 0;
-		}
-	}
+  if (unlikely(!real_pthread_cond_broadcast)) {
+    real_pthread_cond_broadcast = dlsym(RTLD_NEXT, "pthread_cond_broadcast");
+    if ((error = dlerror()) != NULL) {
+       fputs(error, stderr);
+       return 0;
+    }
+  }
 
-	return real_pthread_cond_broadcast(cond);
+  return real_pthread_cond_broadcast(cond);
 }
 
 int pthread_cond_signal(pthread_cond_t *cond) {
   char *error;
 	static int (*real_pthread_cond_signal)(pthread_cond_t *);
 
-	if (!real_pthread_cond_signal) {
+	if (unlikely(!real_pthread_cond_signal)) {
 	  real_pthread_cond_signal = dlsym(RTLD_NEXT, "pthread_cond_signal");
 		if ((error = dlerror()) != NULL) {
 		  fputs(error, stderr);
@@ -211,7 +211,7 @@ int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex) {
   char *error;
   static int (*real_pthread_cond_wait)(pthread_cond_t *, pthread_mutex_t *);
 
-  if (!real_pthread_cond_wait) {
+  if (unlikely(!real_pthread_cond_wait)) {
     real_pthread_cond_wait = dlsym(RTLD_NEXT, "pthread_cond_wait");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
@@ -229,7 +229,7 @@ int pthread_cond_timedwait(pthread_cond_t *cond,
 	static int (*real_pthread_cond_timedwait)(pthread_cond_t *, pthread_mutex_t *,
 	                                          const struct timespec *);
 
-  if (!real_pthread_cond_timedwait) {
+  if (unlikely(!real_pthread_cond_timedwait)) {
 	  real_pthread_cond_timedwait = dlsym(RTLD_NEXT, "pthread_cond_timedwait");
 		if ((error = dlerror()) != NULL) {
 		  fputs(error, stderr);
@@ -245,7 +245,7 @@ void *memset(void *str, int c, size_t n) {
   char *error;
   static void *(*real_memset)(void *, int, size_t);
 
-  if (!real_memset) {
+  if (unlikely(!real_memset)) {
     real_memset = dlsym(RTLD_NEXT, "memset");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
@@ -260,7 +260,7 @@ void *memcpy(void *dest, const void *src, size_t len) {
   char *error;
   static void *(*real_memcpy)(void *, const void *, size_t);
 
-  if (!real_memcpy) {
+  if (unlikely(!real_memcpy)) {
     real_memcpy = dlsym(RTLD_NEXT, "memcpy");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
@@ -275,7 +275,7 @@ void *malloc(size_t size) {
   char *error;
   static void *(*real_malloc)(size_t);
 
-  if (!real_malloc) {
+  if (unlikely(!real_malloc)) {
     real_malloc = dlsym(RTLD_NEXT, "malloc");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
@@ -290,7 +290,7 @@ void free(void *ptr) {
   char *error;
   static void (*real_free)(void *);
 
-  if (!real_free) {
+  if (unlikely(!real_free)) {
     real_free = dlsym(RTLD_NEXT, "free");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
@@ -305,7 +305,7 @@ int rand(void) {
   char *error;
   static int (*real_rand)(void);
 
-  if (!real_rand) {
+  if (unlikely(!real_rand)) {
     real_rand = dlsym(RTLD_NEXT, "rand");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);

@@ -6,6 +6,13 @@
 
 #define barrier()       asm volatile("" ::: "memory")
 
+#ifndef likely
+#define likely(x) __builtin_expect(!!(x), 1)
+#endif
+#ifndef unlikely
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#endif
+
 typedef struct {
   pid_t id;
   char **fsbase;
