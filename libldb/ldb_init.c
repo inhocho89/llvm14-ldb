@@ -136,7 +136,6 @@ void *monitor_main(void *arg) {
   struct timespec now;
   uint64_t elapsed;
 
-  uint64_t elapsed_from_start;
   uint64_t nupdate = 0;
 
   // allocate memory for bookkeeping
@@ -170,7 +169,6 @@ void *monitor_main(void *arg) {
     clock_gettime(CLOCK_MONOTONIC, &now);
     barrier();
     elapsed = (now.tv_sec - last_ts.tv_sec) * 1000000000 + (now.tv_nsec - last_ts.tv_nsec);
-    elapsed_from_start = (now.tv_sec - start_ts.tv_sec) * 1000000000 + (now.tv_nsec - start_ts.tv_nsec);
 
     for (int tidx = 0; tidx < ldb_shared->ldb_max_idx; ++tidx) {
       // Skip if fsbase is invalid

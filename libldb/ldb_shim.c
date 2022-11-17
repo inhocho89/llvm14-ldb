@@ -162,6 +162,21 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
   return real_pthread_mutex_lock(mutex);
 }
 
+int pthread_mutex_trylock(pthread_mutex_t *mutex) {
+	char *error;
+	static int (*real_pthread_mutex_trylock)(pthread_mutex_t *m);
+
+	if (unlikely(!real_pthread_mutex_trylock)) {
+		real_pthread_mutex_trylock = dlsym(RTLD_NEXT, "pthread_mutex_trylock");
+		if ((error = dlerror()) != NULL) {
+			fputs(error, stderr);
+			return 0;
+		}
+	}
+
+	return real_pthread_mutex_trylock(mutex);
+}
+
 int pthread_spin_lock(pthread_spinlock_t *lock) {
   char *error;
   static int (*real_pthread_spin_lock)(pthread_spinlock_t *);
@@ -297,6 +312,7 @@ void free(void *ptr) {
       return;
     }
   }
+
   return real_free(ptr);
 }
 
