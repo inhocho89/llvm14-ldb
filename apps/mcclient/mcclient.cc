@@ -28,7 +28,7 @@
 #define unlikely(x)     __builtin_expect((x),0)
 #define barrier()       asm volatile("" ::: "memory")
 
-#define CYCLES_PER_US 2992
+#define CYCLES_PER_US 2396
 
 constexpr uint16_t kBarrierPort = 41;
 constexpr int kMaxBufLen = 4096;
@@ -59,7 +59,7 @@ int total_agents = 1;
 constexpr uint64_t kWarmUpTime = 0;
 constexpr uint64_t kExperimentTime = 4000000;
 // RTT
-constexpr uint64_t kRTT = 10;
+constexpr uint64_t kRTT = 1000;
 
 std::vector<double> offered_loads;
 double offered_load;
@@ -95,6 +95,20 @@ static inline __attribute__((always_inline)) uint64_t rdtsc(void) {
   uint32_t a, d;
   asm volatile("rdtsc" : "=a" (a), "=d" (d));
   return ((uint64_t)a) | (((uint64_t)d) << 32);
+}
+
+static inline __attribute__((always_inline)) void cpu_relax(void)
+{
+  asm volatile("pause");
+}
+
+static inline __attribute__((always_inline)) void __time_delay_us(uint64_t us)
+{
+  uint64_t cycles = us * CYCLES_PER_US;
+  unsigned long start = rdtsc();
+
+  while (rdtsc() - start < cycles)
+    cpu_relax();
 }
 
 int TcpListen(uint16_t port, int backlog) {
@@ -484,7 +498,8 @@ std::vector<work_unit> ClientWorker(
     uint64_t now = rdtsc();
     barrier();
     if (now - expstart < w[i].start_us * CYCLES_PER_US) {
-      usleep(w[i].start_us - 1.0 * (now - expstart) / CYCLES_PER_US);
+      __time_delay_us(w[i].start_us - 1.0 * (now - expstart) / CYCLES_PER_US);
+      //usleep(w[i].start_us - 1.0 * (now - expstart) / CYCLES_PER_US);
     }
     if ((now - expstart) > (w[i].start_us + kMaxCatchUpUS) * CYCLES_PER_US)
       continue;
@@ -502,9 +517,12 @@ std::vector<work_unit> ClientWorker(
   }
   printf("Finished sending requests\n");
 
-  usleep(kRTT + 2);
+  __time_delay_us(1000);
+  //usleep(kRTT + 2);
+  shutdown(c, SHUT_RDWR);
   close(c);
   th.join();
+  printf("Listener thread joined\n");
 
   return w;
 }
@@ -653,6 +671,15 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs) {
     return;
   }
 
+  printf("Generating output...\n");
+
+  w.erase(std::remove_if(w.begin(), w.end(),
+			 [](const work_unit &s) {
+			   return !s.success;
+	}), w.end());
+
+  double count = static_cast<double>(w.size());
+
   std::sort(w.begin(), w.end(),
       [](const work_unit &s1, const work_unit &s2) {
       return s1.duration_us > s2.duration_us;
@@ -669,26 +696,27 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs) {
 
   latency_out.close();
 
-  w.erase(std::remove_if(w.begin(), w.end(),
-			 [](const work_unit &s) {
-			   return !s.success;
-	}), w.end());
+  std::ofstream cdf_out;
+  cdf_out.open("latency.cdf", std::fstream::out);
 
-  std::sort(w.begin(), w.end(), [](const work_unit &s1, const work_unit &s2) {
-    return s1.duration_us < s2.duration_us;
-  });
+  for (int i = 0; i <= 1000; ++i) {
+    double i_ = i / 1000.0;
+    cdf_out << i_ << "," << w[(count - 1) * (1.0 - i_)].duration_us << std::endl;
+  }
+  
+  cdf_out.close();
+
   double sum = std::accumulate(
       w.begin(), w.end(), 0.0,
       [](double s, const work_unit &c) { return s + c.duration_us; });
   double mean = sum / w.size();
-  double count = static_cast<double>(w.size());
   double p50 = w[count * 0.5].duration_us;
-  double p90 = w[count * 0.9].duration_us;
-  double p99 = w[count * 0.99].duration_us;
-  double p999 = w[count * 0.999].duration_us;
-  double p9999 = w[count * 0.9999].duration_us;
-  double min = w[0].duration_us;
-  double max = w[w.size() - 1].duration_us;
+  double p90 = w[count * 0.1].duration_us;
+  double p99 = w[count * 0.01].duration_us;
+  double p999 = w[count * 0.001].duration_us;
+  double p9999 = w[count * 0.0001].duration_us;
+  double min = w[w.size() - 1].duration_us;
+  double max = w[0].duration_us;
 
   std::cout << std::setprecision(4) << std::fixed << threads * total_agents << ","
       << cs->offered_rps << "," << cs->rps << ","
