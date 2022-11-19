@@ -142,3 +142,12 @@ inline int event_len(ldb_event_handle_t *event) {
 
 void event_record(ldb_event_handle_t *event, int event_type, struct timespec ts,
 		uint32_t tid, uint64_t arg1, uint64_t arg2, uint64_t arg3);
+
+static inline void
+event_record_now(ldb_event_handle_t *event, int event_type,
+                 uint64_t arg1, uint64_t arg2, uint64_t arg3) {
+  struct timespec now;
+  pid_t thread_id = syscall(SYS_gettid);
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  event_record(event, event_type, now, thread_id, arg1, arg2, arg3);
+}

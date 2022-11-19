@@ -4,10 +4,7 @@
 extern ldb_shmseg *ldb_shared;
 
 void ldb_tag_set(uint64_t tag) {
-  struct timespec now;
-  pid_t thread_id = syscall(SYS_gettid);
-  clock_gettime(CLOCK_MONOTONIC, &now);
-  event_record(&ldb_shared->event, LDB_EVENT_TAG_SET, now, thread_id, tag, 0, 0);
+  event_record_now(&ldb_shared->event, LDB_EVENT_TAG_SET, tag, 0, 0);
 }
 
 void ldb_tag_clear() {
@@ -15,8 +12,5 @@ void ldb_tag_clear() {
 }
 
 void ldb_tag_block(uint64_t tag) {
-  struct timespec now;
-  pid_t thread_id = syscall(SYS_gettid);
-  clock_gettime(CLOCK_MONOTONIC, &now);
-  event_record(&ldb_shared->event, LDB_EVENT_TAG_BLOCK, now, thread_id, tag, 0, 0);
+  event_record_now(&ldb_shared->event, LDB_EVENT_TAG_BLOCK, tag, 0, 0);
 }

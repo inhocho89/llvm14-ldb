@@ -133,6 +133,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 int pthread_mutex_lock(pthread_mutex_t *mutex) {
   char *error;
   static int (*real_pthread_mutex_lock)(pthread_mutex_t *m);
+  int ret;
 
   if (unlikely(!real_pthread_mutex_lock)) {
     real_pthread_mutex_lock = dlsym(RTLD_NEXT, "pthread_mutex_lock");
@@ -142,7 +143,28 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
     }
   }
 
-  return real_pthread_mutex_lock(mutex);
+  event_record_now(&ldb_shared->event, LDB_EVENT_MUTEX_WAIT, (uintptr_t)mutex, 0, 0);
+  ret = real_pthread_mutex_lock(mutex);
+  event_record_now(&ldb_shared->event, LDB_EVENT_MUTEX_LOCK, (uintptr_t)mutex, 0, 0);
+  return ret;
+}
+
+int pthread_mutex_unlock(pthread_mutex_t *mutex) {
+  char *error;
+  static int (*real_pthread_mutex_unlock)(pthread_mutex_t *m);
+  int ret;
+
+  if (unlikely(!real_pthread_mutex_unlock)) {
+    real_pthread_mutex_unlock = dlsym(RTLD_NEXT, "pthread_mutex_unlock");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return 0;
+    }
+  }
+
+  ret = real_pthread_mutex_unlock(mutex);
+  event_record_now(&ldb_shared->event, LDB_EVENT_MUTEX_UNLOCK, (uintptr_t)mutex, 0, 0);
+  return ret;
 }
 
 int pthread_mutex_trylock(pthread_mutex_t *mutex) {
