@@ -33,6 +33,8 @@ void *logger_main(void *arg) {
     nWakeup++;
 
     len = event_len(event);
+    // head is only modified by logger.
+    pthread_mutex_unlock(&event->m_event);
 
     if (event->head + len <= LDB_EVENT_BUF_SIZE) {
       fwrite(&event->events[event->head], sizeof(ldb_event_entry), len, ldb_fout);
@@ -46,6 +48,7 @@ void *logger_main(void *arg) {
     fflush(ldb_fout);
     system(cmd_buf);
 
+    pthread_mutex_lock(&event->m_event);
     event->head = (event->head + len) % LDB_EVENT_BUF_SIZE;
     event->last_write = now_.tv_sec;
   } 

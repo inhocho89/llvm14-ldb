@@ -2,7 +2,9 @@
 
 void event_record(ldb_event_handle_t *event, int event_type, struct timespec ts,
     uint32_t tid, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
+
   pthread_mutex_lock(&event->m_event);
+
   // now this becomes very unlikely
   if ((event->tail + 1) % LDB_EVENT_BUF_SIZE == event->head) {
     event->nignored++;

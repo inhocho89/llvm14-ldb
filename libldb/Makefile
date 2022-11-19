@@ -30,7 +30,7 @@ tag.o: tag.c
 	$(CC) $(LDB_CFLAGS) -o $@ -c $<
 
 event.o: event.c
-	$(CC) $(LDB_CFLAGS) -o $@ -c $<
+	$(CC) $(LDB_CFLAGS) -fPIC -o $@ -c $<
 
 clean:
 	rm event.o monitor.o logger.o hook.o shim.o libshim.so libldb.a
