@@ -3,10 +3,10 @@ CC=$(ROOT_PATH)/build/bin/clang
 AR=$(ROOT_PATH)/build/bin/llvm-ar
 RANLIB=/usr/bin/ranlib
 
-LDBINIT = $(ROOT_PATH)/libldb/ldb_init.o
+LIBLDB = $(ROOT_PATH)/libldb/libldb.a
 
 LDB_LDFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer
-LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb
+LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb/include
 
 quicly_src = frame.c cc-reno.c cc-cubic.c cc-pico.c defaults.c local_cid.c loss.c quicly.c \
 						 ranges.c rate.c recvstate.c remote_cid.c retire_cid.c sendstate.c sentmap.c \
@@ -34,8 +34,8 @@ all: extern/quicly/quicly-tracer.h qperf
 extern/quicly/quicly-tracer.h:
 	../extern/quicly/misc/probe2trace.pl -a tracer < ../extern/quicly/quicly-probes.d > $@
 
-qperf: $(qperf_obj) extern/quicly/libquicly.a extern/libpicotls.a $(LDBINIT)
-	$(CC) $(qperf_obj) $(LDB_LDFLAGS) -o $@ $(LDBINIT) extern/quicly/libquicly.a \
+qperf: $(qperf_obj) extern/quicly/libquicly.a extern/libpicotls.a $(LIBLDB)
+	$(CC) $(qperf_obj) $(LDB_LDFLAGS) -o $@ $(LIBLDB) extern/quicly/libquicly.a \
 		extern/libpicotls.a -lev -O2 -pthread -lm /usr/lib/x86_64-linux-gnu/libssl.so \
 	 	/usr/lib/x86_64-linux-gnu/libcrypto.so
 

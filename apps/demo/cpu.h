@@ -1,5 +1,5 @@
 
-#define CYCLES_PER_US 2992
+#define CYCLES_PER_US 2396
 
 static inline __attribute__((always_inline)) char *rdfsbase() {
   char *fsbase;

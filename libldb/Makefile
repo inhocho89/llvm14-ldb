@@ -2,17 +2,35 @@ ROOT_PATH=..
 CXX = $(ROOT_PATH)/build/bin/clang++
 CC = $(ROOT_PATH)/build/bin/clang
 GCC = /usr/bin/gcc
+AR = /usr/bin/ar
 
-all: ldb_init.o ldb_shim.so
+LDB_CFLAGS = -O3 -g -fdebug-default-version=3 -fno-omit-frame-pointer -I./include
 
-ldb_shim.so: ldb_shim.c
-	$(CC) -shared -O1 -g -fdebug-default-version=3 -fno-omit-frame-pointer -fpic -ldl -lpthread ldb_shim.c -o ldb_shim.so
+all: libshim.so libldb.a
 
-ldb_init.o: ldb_init.c
-	$(CC) -O3 -g -fdebug-default-version=3 -fno-omit-frame-pointer -c ldb_init.c -o ldb_init.o
+libldb.a: hook.o logger.o monitor.o event.o tag.o
+	$(AR) qc $@ $^
 
-ldb_init.ll: ldb_init.c
-	$(CC) -O3 -g -fno-omit-frame-pointer -S -emit-llvm ldb_init.c -o ldb_init.ll
+libshim.so: shim.o event.o
+	$(CC) -shared -lpthread -ldl -o $@ $^
+
+shim.o: shim.c
+	$(CC) -O1 -g -fdebug-default-version=3 -fno-omit-frame-pointer -fPIC -o $@ -c $<
+
+hook.o: hook.c
+	$(CC) $(LDB_CFLAGS) -o $@ -c $<
+
+logger.o: logger.c
+	$(CC) $(LDB_CFLAGS) -o $@ -c $<
+
+monitor.o: monitor.c
+	$(CC) $(LDB_CFLAGS) -o $@ -c $<
+
+tag.o: tag.c
+	$(CC) $(LDB_CFLAGS) -o $@ -c $<
+
+event.o: event.c
+	$(CC) $(LDB_CFLAGS) -o $@ -c $<
 
 clean:
-	rm ldb_init.o ldb_shim.so
+	rm event.o monitor.o logger.o hook.o shim.o libshim.so libldb.a

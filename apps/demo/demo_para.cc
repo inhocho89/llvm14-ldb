@@ -8,7 +8,6 @@
 #include <pthread.h>
 
 #include "cpu.h"
-#include "../../libldb/ldb_tag.h"
 
 #define WORKER_US 10
 #define NSAMPLE 10000

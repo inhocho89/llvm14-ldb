@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <pthread.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -10,14 +11,13 @@
 #include <bits/pthreadtypes.h>
 #include <dlfcn.h>
 
-#include "ldb.h"
-#include "ldb_tag.h"
+#include "common.h"
 
-ldb_shmseg *ldb_shared;
+static ldb_shmseg *ldb_shared;
 
 typedef struct {   
-    void *(*worker_func)(void *param);
-    void *param;
+  void *(*worker_func)(void *param);
+  void *param;
 } pthread_param_t;
 
 static inline __attribute__((always_inline)) uint64_t get_ngen() {
@@ -28,26 +28,10 @@ static inline __attribute__((always_inline)) uint64_t get_ngen() {
   return ngen;
 }
 
-static inline __attribute__((always_inline)) char *get_rbp() {
-  char *rbp;
-
-  asm volatile ("movq %%fs:-8, %0 \n\t" : "=r"(rbp) :: "memory");
-
-  return rbp;
-}
-
-static inline __attribute__((always_inline)) char *get_real_rbp() {
-  char *rbp;
-
-  asm volatile ("movq %%rbp, %0 \n\t" : "=r"(rbp) :: "memory");
-
-  return rbp;
-}
-
-int __ldb_get_tidx() {
+inline int get_tidx(ldb_shmseg *ldb_shared) {
   // find reusable slot
   for (int i = 0; i < ldb_shared->ldb_max_idx; ++i) {
-    if (ldb_shared->ldb_thread_info[i].fsbase == NULL) {
+    if (ldb_shared->ldb_thread_infos[i].fsbase == NULL) {
       ldb_shared->ldb_nthread++;
       return i;
     }
@@ -60,8 +44,8 @@ int __ldb_get_tidx() {
   return (ldb_shared->ldb_max_idx - 1);
 }
 
-void __ldb_put_tidx(int tidx) {
-  ldb_shared->ldb_thread_info[tidx].fsbase = NULL;
+inline void put_tidx(ldb_shmseg *ldb_shared, int tidx) {
+  ldb_shared->ldb_thread_infos[tidx].fsbase = NULL;
 
   // This is the last slot
   if (tidx == ldb_shared->ldb_max_idx - 1) {
@@ -80,11 +64,11 @@ void *__ldb_thread_start(void *arg) {
 
   free(arg);
 
-  // clear tag
-  __ldb_clear_tag();
+  // initialize canary
+  setup_canary();
 
   // initialize stack
-  char *rbp = get_rbp(); // this is the rbp of thread main
+  char *rbp = get_fs_rbp(); // this is the rbp of thread main
 
   // set ngen to 0
   *((uint64_t *)(rbp + 16)) = 0;
@@ -94,20 +78,19 @@ void *__ldb_thread_start(void *arg) {
   *((uint64_t *)rbp) = 0;
 
   printf("New interposed thread is starting... thread ID = %ld\n", syscall(SYS_gettid));
-  printf("ngen = %lu, tls rbp = %p, real rbp = %p\n", get_ngen(), get_rbp(), get_real_rbp());
+  printf("ngen = %lu, tls rbp = %p, real rbp = %p\n", get_ngen(), get_fs_rbp(), get_rbp());
 
   // attach shared memory
-  if (ldb_shared == NULL) {
-    int shmid = shmget(SHM_KEY, sizeof(ldb_shmseg), 0666);
-    ldb_shared = shmat(shmid, NULL, 0);
+  if (unlikely(!ldb_shared)) {
+    ldb_shared = attach_shared_memory();
   }
 
   // start tracking
   pthread_spin_lock(&(ldb_shared->ldb_tlock));
-  tidx = __ldb_get_tidx();
-  ldb_shared->ldb_thread_info[tidx].id = syscall(SYS_gettid);
-  ldb_shared->ldb_thread_info[tidx].fsbase = (char **)(rdfsbase());
-  ldb_shared->ldb_thread_info[tidx].stackbase = rbp;
+  tidx = get_tidx(ldb_shared);
+  ldb_shared->ldb_thread_infos[tidx].id = syscall(SYS_gettid);
+  ldb_shared->ldb_thread_infos[tidx].fsbase = (char **)(rdfsbase());
+  ldb_shared->ldb_thread_infos[tidx].stackbase = rbp;
   pthread_spin_unlock(&(ldb_shared->ldb_tlock));
 
   // execute real thread
@@ -115,7 +98,7 @@ void *__ldb_thread_start(void *arg) {
 
   // stop tracking
   pthread_spin_lock(&(ldb_shared->ldb_tlock));
-  __ldb_put_tidx(tidx);
+  put_tidx(ldb_shared, tidx);
   pthread_spin_unlock(&(ldb_shared->ldb_tlock));
 
   return ret;
@@ -125,7 +108,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
                           void *(*start_routine) (void *), void *arg) {
     char *error;
     static int (*real_pthread_create)(pthread_t *thread, const pthread_attr_t *attr,
-		    void *(*start_routine) (void *), void *arg);
+        void *(*start_routine) (void *), void *arg);
 
     if (unlikely(!real_pthread_create)) {
       real_pthread_create = dlsym(RTLD_NEXT, "pthread_create");
@@ -163,18 +146,18 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
 }
 
 int pthread_mutex_trylock(pthread_mutex_t *mutex) {
-	char *error;
-	static int (*real_pthread_mutex_trylock)(pthread_mutex_t *m);
+  char *error;
+  static int (*real_pthread_mutex_trylock)(pthread_mutex_t *m);
 
-	if (unlikely(!real_pthread_mutex_trylock)) {
-		real_pthread_mutex_trylock = dlsym(RTLD_NEXT, "pthread_mutex_trylock");
-		if ((error = dlerror()) != NULL) {
-			fputs(error, stderr);
-			return 0;
-		}
-	}
+  if (unlikely(!real_pthread_mutex_trylock)) {
+    real_pthread_mutex_trylock = dlsym(RTLD_NEXT, "pthread_mutex_trylock");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return 0;
+    }
+  }
 
-	return real_pthread_mutex_trylock(mutex);
+  return real_pthread_mutex_trylock(mutex);
 }
 
 int pthread_spin_lock(pthread_spinlock_t *lock) {
@@ -209,17 +192,17 @@ int pthread_cond_broadcast(pthread_cond_t *cond) {
 
 int pthread_cond_signal(pthread_cond_t *cond) {
   char *error;
-	static int (*real_pthread_cond_signal)(pthread_cond_t *);
+  static int (*real_pthread_cond_signal)(pthread_cond_t *);
 
-	if (unlikely(!real_pthread_cond_signal)) {
-	  real_pthread_cond_signal = dlsym(RTLD_NEXT, "pthread_cond_signal");
-		if ((error = dlerror()) != NULL) {
-		  fputs(error, stderr);
-			return 0;
-		}
-	}
+  if (unlikely(!real_pthread_cond_signal)) {
+    real_pthread_cond_signal = dlsym(RTLD_NEXT, "pthread_cond_signal");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return 0;
+    }
+  }
 
-	return real_pthread_cond_signal(cond);
+  return real_pthread_cond_signal(cond);
 }
 
 int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex) {
@@ -241,18 +224,18 @@ int pthread_cond_timedwait(pthread_cond_t *cond,
                            pthread_mutex_t *mutex,
                            const struct timespec *abstime) {
   char *error;
-	static int (*real_pthread_cond_timedwait)(pthread_cond_t *, pthread_mutex_t *,
-	                                          const struct timespec *);
+  static int (*real_pthread_cond_timedwait)(pthread_cond_t *, pthread_mutex_t *,
+      const struct timespec *);
 
   if (unlikely(!real_pthread_cond_timedwait)) {
-	  real_pthread_cond_timedwait = dlsym(RTLD_NEXT, "pthread_cond_timedwait");
-		if ((error = dlerror()) != NULL) {
-		  fputs(error, stderr);
-			return 0;
-		}
-	}
+    real_pthread_cond_timedwait = dlsym(RTLD_NEXT, "pthread_cond_timedwait");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return 0;
+    }
+  }
 
-	return real_pthread_cond_timedwait(cond, mutex, abstime);
+  return real_pthread_cond_timedwait(cond, mutex, abstime);
 }
 
 /* memory-related functions */
@@ -313,7 +296,7 @@ void free(void *ptr) {
     }
   }
 
-  return real_free(ptr);
+  return real_free(ptr); 
 }
 
 /* other useful functions */
