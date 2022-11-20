@@ -45,8 +45,6 @@ void __ldbInit(void) {
   ldb_shared->event.commit = 0;
   ldb_shared->event.nignored = 0;
   ldb_shared->event.events = (ldb_event_entry *)malloc(LDB_EVENT_BUF_SIZE * sizeof(ldb_event_entry));
-  pthread_mutex_init(&ldb_shared->event.m_event, NULL);
-  pthread_cond_init(&ldb_shared->event.cv_event, NULL);
 
   running = true;
 
@@ -67,7 +65,6 @@ void __ldbExit(void) {
   running = false;
 
   pthread_join(monitor_th, &ret);
-  pthread_cond_broadcast(&ldb_shared->event.cv_event);
   pthread_join(logger_th, &ret);
 
   free(ldb_shared->ldb_thread_infos);

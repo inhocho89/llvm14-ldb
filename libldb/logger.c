@@ -27,8 +27,10 @@ void *logger_main(void *arg) {
     len = (LDB_EVENT_BUF_SIZE + ((commit_ - head_) % LDB_EVENT_BUF_SIZE)) % LDB_EVENT_BUF_SIZE;
 
     // busy-running while waiting for entry
-    if (len == 0)
+    if (len == 0) {
+      barrier();
       continue;
+    }
 
     if (head_ + len <= LDB_EVENT_BUF_SIZE) {
       fwrite(&event->events[head_], sizeof(ldb_event_entry), len, ldb_fout);

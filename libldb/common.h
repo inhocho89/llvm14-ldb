@@ -61,8 +61,6 @@ typedef struct {
   int commit; // maximum safe index to read
   time_t last_write;
   uint64_t nignored;
-  pthread_mutex_t m_event;
-  pthread_cond_t cv_event;
   ldb_event_entry *events;
 } ldb_event_handle_t;
 
