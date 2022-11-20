@@ -8,7 +8,7 @@ void ldb_tag_set(uint64_t tag) {
 }
 
 void ldb_tag_clear() {
-  ldb_tag_add(0);
+  ldb_tag_set(0);
 }
 
 void ldb_tag_block(uint64_t tag) {

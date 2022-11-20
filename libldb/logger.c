@@ -4,12 +4,12 @@
 
 extern ldb_shmseg *ldb_shared;
 extern bool running;
-static uint64_t nWakeup;
 
 void *logger_main(void *arg) {
   FILE *ldb_fout = fopen(LDB_EVENT_OUTPUT, "wb");
-  struct timespec now_;
-  char cmd_buf[128];
+  char cmd_map_buf[128];
+  int head_;
+  int commit_;
   int len;
   ldb_event_handle_t *event = &ldb_shared->event;
 
@@ -17,45 +17,36 @@ void *logger_main(void *arg) {
 
   // store maps
   pid_t pid_self = syscall(SYS_getpid);
-  sprintf(cmd_buf, "cat /proc/%d/maps > maps.data", pid_self);
-  system(cmd_buf);
-  clock_gettime(CLOCK_MONOTONIC, &now_);
-  nWakeup = 0;
+  sprintf(cmd_map_buf, "cat /proc/%d/maps > maps.data", pid_self);
+  // does map information changes over time?
+  system(cmd_map_buf);
 
-  pthread_mutex_lock(&event->m_event);
-  event->last_write = now_.tv_sec;
   while (running) {
-    while (running && event_len(event) < LDB_EVENT_THRESH &&
-        now_.tv_sec - event->last_write < LDB_EVENT_MIN_INT) {
-      pthread_cond_wait(&event->cv_event, &event->m_event);
-      clock_gettime(CLOCK_MONOTONIC, &now_);
-    }
-    nWakeup++;
+    head_ = event->head;
+    commit_ = event->commit;
+    len = (LDB_EVENT_BUF_SIZE + ((commit_ - head_) % LDB_EVENT_BUF_SIZE)) % LDB_EVENT_BUF_SIZE;
 
-    len = event_len(event);
-    // head is only modified by logger.
-    pthread_mutex_unlock(&event->m_event);
+    // busy-running while waiting for entry
+    if (len == 0)
+      continue;
 
-    if (event->head + len <= LDB_EVENT_BUF_SIZE) {
-      fwrite(&event->events[event->head], sizeof(ldb_event_entry), len, ldb_fout);
+    if (head_ + len <= LDB_EVENT_BUF_SIZE) {
+      fwrite(&event->events[head_], sizeof(ldb_event_entry), len, ldb_fout);
     } else {
-      fwrite(&event->events[event->head], sizeof(ldb_event_entry),
-          LDB_EVENT_BUF_SIZE-event->head, ldb_fout);
-      fwrite(&event->events[0], sizeof(ldb_event_entry),
-          (event->head + len) % LDB_EVENT_BUF_SIZE, ldb_fout);
+      fwrite(&event->events[head_], sizeof(ldb_event_entry), LDB_EVENT_BUF_SIZE - head_,
+          ldb_fout);
+      fwrite(&event->events[0], sizeof(ldb_event_entry), (head_ + len) % LDB_EVENT_BUF_SIZE,
+          ldb_fout);
     }
 
     fflush(ldb_fout);
-    system(cmd_buf);
 
-    pthread_mutex_lock(&event->m_event);
-    event->head = (event->head + len) % LDB_EVENT_BUF_SIZE;
-    event->last_write = now_.tv_sec;
-  } 
-  pthread_mutex_unlock(&event->m_event);
+    // only logger can modify head
+    event->head = (head_ + len) % LDB_EVENT_BUF_SIZE;
+  }
 
   fclose(ldb_fout);
 
-  printf("logger thread exiting... waken up %lu times\n", nWakeup);
+  printf("logger thread exiting...\n");
   return NULL;
 }

@@ -15,11 +15,10 @@
 #define LDB_MAX_NTHREAD 128
 #define LDB_MAX_CALLDEPTH 1024
 #define LDB_EVENT_BUF_SIZE 400000
-#define LDB_EVENT_THRESH 100000
-#define LDB_EVENT_MIN_INT 10
 #define LDB_CANARY 0xDEADBEEF
 
-#define barrier()       asm volatile("" ::: "memory")
+#define barrier() asm volatile("" ::: "memory")
+#define CAS(x,y,z) __sync_bool_compare_and_swap(x,y,z)
 
 #ifndef likely
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -57,8 +56,9 @@ typedef struct {
 }__attribute__((packed, aligned(8))) ldb_event_entry;
 
 typedef struct {
-  int head;
-  int tail;
+  int head;   // current read index
+  int tail;   // current write index
+  int commit; // maximum safe index to read
   time_t last_write;
   uint64_t nignored;
   pthread_mutex_t m_event;
@@ -134,11 +134,7 @@ inline __attribute__((always_inline)) ldb_shmseg *attach_shared_memory() {
 }
 
 /* Event related functions */
-inline int event_len(ldb_event_handle_t *event) {
-  int i = event->tail - event->head;
 
-  return (LDB_EVENT_BUF_SIZE + (i % LDB_EVENT_BUF_SIZE)) % LDB_EVENT_BUF_SIZE;
-}
 
 void event_record(ldb_event_handle_t *event, int event_type, struct timespec ts,
 		uint32_t tid, uint64_t arg1, uint64_t arg2, uint64_t arg3);

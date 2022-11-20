@@ -42,6 +42,7 @@ void __ldbInit(void) {
   // initialize event buffer
   ldb_shared->event.head = 0;
   ldb_shared->event.tail = 0;
+  ldb_shared->event.commit = 0;
   ldb_shared->event.nignored = 0;
   ldb_shared->event.events = (ldb_event_entry *)malloc(LDB_EVENT_BUF_SIZE * sizeof(ldb_event_entry));
   pthread_mutex_init(&ldb_shared->event.m_event, NULL);
