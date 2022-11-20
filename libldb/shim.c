@@ -114,7 +114,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
       real_pthread_create = dlsym(RTLD_NEXT, "pthread_create");
       if( (error = dlerror()) != NULL) {
           fputs(error, stderr);
-          return 0;
+          return -1;
       }
     }
 
@@ -130,6 +130,29 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     return real_pthread_create(thread, attr, &__ldb_thread_start, worker_params);
 }
 
+int pthread_join(pthread_t thread, void **retval) {
+  char *error;
+  static int (*real_pthread_join)(pthread_t, void **);
+  int ret;
+
+  if (unlikely(!real_pthread_join)) {
+    real_pthread_join = dlsym(RTLD_NEXT, "pthread_join");
+    if ((error = dlerror()) != NULL) {
+      fputs(error, stderr);
+      return -1;
+    }
+  }
+
+  // pthread_t -> tid mapping should be stored at pthread_create
+  event_record_now(&ldb_shared->event, LDB_EVENT_JOIN_WAIT, (uint64_t)thread, 0, 0);
+  ret = real_pthread_join(thread, retval);
+  if (likely(ret == 0)) {
+    event_record_now(&ldb_shared->event, LDB_EVENT_JOIN_JOINED, (uint64_t)thread, 0, 0);
+  }
+
+  return ret;
+}
+
 int pthread_mutex_lock(pthread_mutex_t *mutex) {
   char *error;
   static int (*real_pthread_mutex_lock)(pthread_mutex_t *m);
@@ -139,7 +162,7 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
     real_pthread_mutex_lock = dlsym(RTLD_NEXT, "pthread_mutex_lock");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
-      return 0;
+      return -1;
     }
   }
 
@@ -162,7 +185,7 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex) {
     real_pthread_mutex_unlock = dlsym(RTLD_NEXT, "pthread_mutex_unlock");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
-      return 0;
+      return -1;
     }
   }
 
@@ -184,7 +207,7 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex) {
     real_pthread_mutex_trylock = dlsym(RTLD_NEXT, "pthread_mutex_trylock");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
-      return 0;
+      return -1;
     }
   }
 
@@ -205,7 +228,7 @@ int pthread_spin_lock(pthread_spinlock_t *lock) {
     real_pthread_spin_lock = dlsym(RTLD_NEXT, "pthread_spin_lock");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
-      return 0;
+      return -1;
     }
   }
 
@@ -220,7 +243,7 @@ int pthread_cond_broadcast(pthread_cond_t *cond) {
     real_pthread_cond_broadcast = dlsym(RTLD_NEXT, "pthread_cond_broadcast");
     if ((error = dlerror()) != NULL) {
        fputs(error, stderr);
-       return 0;
+       return -1;
     }
   }
 
@@ -235,7 +258,7 @@ int pthread_cond_signal(pthread_cond_t *cond) {
     real_pthread_cond_signal = dlsym(RTLD_NEXT, "pthread_cond_signal");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
-      return 0;
+      return -1;
     }
   }
 
@@ -250,7 +273,7 @@ int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex) {
     real_pthread_cond_wait = dlsym(RTLD_NEXT, "pthread_cond_wait");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
-      return 0;
+      return -1;
     }
   }
 
@@ -268,7 +291,7 @@ int pthread_cond_timedwait(pthread_cond_t *cond,
     real_pthread_cond_timedwait = dlsym(RTLD_NEXT, "pthread_cond_timedwait");
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
-      return 0;
+      return -1;
     }
   }
 
