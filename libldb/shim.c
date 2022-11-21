@@ -166,10 +166,12 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
     }
   }
 
-  event_record_now(&ldb_shared->event, LDB_EVENT_MUTEX_WAIT, (uintptr_t)mutex, 0, 0);
+  if (likely(ldb_shared)) {
+    event_record_now(&ldb_shared->event, LDB_EVENT_MUTEX_WAIT, (uintptr_t)mutex, 0, 0);
+  }
   ret = real_pthread_mutex_lock(mutex);
 
-  if (likely(ret == 0)) {
+  if (likely(ldb_shared && ret == 0)) {
     event_record_now(&ldb_shared->event, LDB_EVENT_MUTEX_LOCK, (uintptr_t)mutex, 0, 0);
   } // else record fail?
 
@@ -191,7 +193,7 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex) {
 
   ret = real_pthread_mutex_unlock(mutex);
 
-  if (likely(ret == 0)) {
+  if (likely(ldb_shared && ret == 0)) {
     event_record_now(&ldb_shared->event, LDB_EVENT_MUTEX_UNLOCK, (uintptr_t)mutex, 0, 0);
   }
 
@@ -213,7 +215,7 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex) {
 
   ret = real_pthread_mutex_trylock(mutex);
 
-  if (ret == 0) {
+  if (likely(ldb_shared) && ret == 0) {
     event_record_now(&ldb_shared->event, LDB_EVENT_MUTEX_LOCK, (uintptr_t)mutex, 0, 0);
   }
 
