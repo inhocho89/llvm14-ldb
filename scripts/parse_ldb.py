@@ -22,6 +22,8 @@ from elftools.common.py3compat import bytes2str
 from elftools.dwarf.descriptions import describe_form_class
 from elftools.elf.elffile import ELFFile
 
+LDB_DATA_FILENAME = "ldb.data"
+
 def decode_funcname(dwarfinfo, address):
     # Go over all DIEs in the DWARF information, looking for a subprogram
     # entry with an address range that includes the given address. Note that
@@ -156,26 +158,28 @@ def get_finfo(dwarfinfo, mapsinfo, address):
 
     return "???"
 
-def generate_stats(executable, ldb_raw):
+def generate_stats(executable):
     print('executable: {}'.format(executable))
-    print('LDB data: {}'.format(ldb_raw))
+    print('LDB data: {}'.format(LDB_DATA_FILENAME))
     latencies = {}
 
     dwarfinfo = parse_elf(executable)
     mapsinfo = parse_maps()
+    nline = 0
 
     # collect latency informations
-    with open(ldb_raw, 'r') as ldb_raw_file:
-        csv_reader = csv.reader(ldb_raw_file, delimiter=',')
-        for row in csv_reader:
-            if (len(row) != 7):
+    with open(LDB_DATA_FILENAME, 'rb') as ldb_bin:
+        while (byte := ldb_bin.read(40)):
+            event_type = int.from_bytes(byte[0:4], "little")
+            #ts_sec = int.from_bytes(byte[4:8], "little")
+            #ts_nsec = int.from_bytes(byte[8:12], "little")
+            #tid = int.from_bytes(byte[12:16], "little")
+            latency = int.from_bytes(byte[16:24], "little") / 1000.0
+            pc = int.from_bytes(byte[24:32], "little")
+            #ngen = int.from_bytes(byte[32:40], "little")
+
+            if event_type != 1:
                 continue
-            #timestamp = int(row[0])
-            #thread_id = int(row[1])
-            #tag = int(row[2])
-            #ngen = int(row[3])
-            latency = float(row[4]) / 1000.0
-            pc = int(row[5],0)
 
             if pc in latencies:
                 latencies[pc].append(latency)
@@ -187,6 +191,8 @@ def generate_stats(executable, ldb_raw):
         pc -= 5
         larr.sort()
         N = len(larr)
+        if larr[N-1] == 0.0:
+            continue
         latencies_ordered.append({'pc': pc, 'num_samples': N, 'median': larr[int(N * 0.5)],
             '90p': larr[int(N * 0.9)], '99p': larr[int(N * 0.99)], '999p': larr[int(N * 0.999)]})
 
@@ -206,12 +212,7 @@ def generate_stats(executable, ldb_raw):
         print('    99.9p: {:.4f}'.format(e['999p']))
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print('Expected usage: {0} <executable> <ldb raw output=ldb.data>'.format(sys.argv[0]))
+    if len(sys.argv) != 2:
+        print('Expected usage: {0} <executable>'.format(sys.argv[0]))
         sys.exit(1)
-    #addr = int(sys.argv[1], 0)
-    ldb_raw = "ldb.data"
-    if len(sys.argv) > 2:
-        ldb_raw = argv[2]
-    generate_stats(sys.argv[1], ldb_raw)
-    #process_file(sys.argv[2], addr)
+    generate_stats(sys.argv[1])

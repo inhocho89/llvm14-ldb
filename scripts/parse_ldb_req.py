@@ -22,6 +22,11 @@ from elftools.common.py3compat import bytes2str
 from elftools.dwarf.descriptions import describe_form_class
 from elftools.elf.elffile import ELFFile
 
+LDB_DATA_FILENAME = "ldb.data"
+MAPS_DATA_FILENAME = "maps.data"
+PERF_DATA_FILENAME = "perf.data"
+PERF_DEC_FILENAME = "perf.dec"
+
 def decode_funcname(dwarfinfo, address):
     # Go over all DIEs in the DWARF information, looking for a subprogram
     # entry with an address range that includes the given address. Note that
@@ -103,11 +108,11 @@ def parse_elf(executable):
         return dwarfinfo
 
 def parse_maps():
-    if not os.path.exists("maps.data"):
+    if not os.path.exists(MAPS_DATA_FILENAME):
         return None
 
     maps_arr = []
-    with open("maps.data", 'r') as maps_file:
+    with open(MAPS_DATA_FILENAME, 'r') as maps_file:
         csv_reader = csv.reader(maps_file, skipinitialspace=True, delimiter=' ')
         for row in csv_reader:
             if len(row) < 6:
@@ -156,58 +161,86 @@ def get_finfo(dwarfinfo, mapsinfo, address):
     return "???"
 
 def parse_ldb(executable, mreq):
-    print('LDB Data: ldb.data')
+    print('LDB Data: {}'.format(LDB_DATA_FILENAME))
     dwarfinfo = parse_elf(executable)
     mapsinfo = parse_maps()
 
     filter_req = []
     thread_list = []
+    thread_context = []
     finfo_cache = {}
     nthread = 0
     min_tsc = 0
     max_tsc = 0
 
     # collect latency informations
-    with open("ldb.data", 'r') as ldb_raw_file:
-        csv_reader = csv.reader(ldb_raw_file, delimiter=',')
-        for row in csv_reader:
-            if (len(row) != 7):
-                continue
-            timestamp = float(row[0])
-            timestamp_us = timestamp * 1000000
-            thread_id = int(row[1])
-            nreq = int(row[2])
-            ngen = int(row[3])
-            latency = int(row[4])
-            latency_us = latency / 1000.0
-            pc = int(row[5],0)
+    with open(LDB_DATA_FILENAME, 'rb') as ldb_bin:
+        while (byte := ldb_bin.read(40)):
+            event_type = int.from_bytes(byte[0:4], "little")
+            ts_sec = int.from_bytes(byte[4:8], "little")
+            ts_nsec = int.from_bytes(byte[8:12], "little")
+            timestamp_us = ts_sec * 1000000 + ts_nsec / 1000.0
+            tid = int.from_bytes(byte[12:16], "little")
+            arg1 = int.from_bytes(byte[16:24], "little")
+            arg2 = int.from_bytes(byte[24:32], "little")
+            arg3 = int.from_bytes(byte[32:40], "little")
 
-            timestamp_us -= latency_us
+            if event_type == 1: # stack sample
+                latency_us = arg1 / 1000.0
+                pc = arg2
+                ngen = arg3
 
-            if nreq != mreq:
-                continue
+                if tid not in thread_context:
+                    continue
 
-            if min_tsc == 0 or min_tsc > timestamp_us:
-                min_tsc = timestamp_us
+                timestamp_us -= latency_us
+                if min_tsc == 0 or min_tsc > timestamp_us:
+                    min_tsc = timestamp_us
 
-            if max_tsc == 0 or max_tsc < timestamp_us:
-                max_tsc = timestamp_us
+                if max_tsc == 0 or max_tsc < timestamp_us + latency_us:
+                    max_tsc = timestamp_us + latency_us
 
-            if thread_id not in thread_list:
-                thread_list.append(thread_id)
+                if tid not in thread_list:
+                    thread_list.append(tid)
 
-            pc -= 5
-            if pc not in finfo_cache:
-                finfo_cache[pc] = get_finfo(dwarfinfo, mapsinfo, pc)
+                pc -= 5
+                if pc not in finfo_cache:
+                    finfo_cache[pc] = get_finfo(dwarfinfo, mapsinfo, pc)
 
-            finfo = finfo_cache[pc]
+                finfo = finfo_cache[pc]
 
-            filter_req.append({'tsc': timestamp_us,
-                'thread_idx': thread_id,
-                'ngen': ngen,
-                'latency': latency_us,
-                'pc': pc,
-                'finfo': finfo})
+                filter_req.append({'tsc': timestamp_us,
+                    'thread_idx': tid,
+                    'event': "STACK_SAMPLE",
+                    'detail': "ngen={:d}, latency={:f}, pc={}({})"
+                            .format(ngen, latency_us, hex(pc), finfo)})
+
+            elif event_type == 2: # tag set
+                tag = arg1
+
+                if tag != mreq and tid in thread_context:
+                    thread_context.remove(tid)
+                    filter_req.append({'tsc': timestamp_us,
+                        'thread_idx': tid,
+                        'event': "TAG_UNSET",
+                        'detail': "new_tag={:d}".format(tag)})
+
+                if tag == mreq and tid not in thread_context:
+                    thread_context.append(tid)
+                    filter_req.append({'tsc': timestamp_us,
+                        'thread_idx': tid,
+                        'event': "TAG_SET",
+                        'detail': ""})
+
+            elif event_type == 3: # tag block
+                tag = arg1
+                
+                if tag == mreq and tid in thread_context:
+                    thread_context.remove(tid)
+                    filter_req.append({'tsc': timestamp_us,
+                        'thread_idx': tid,
+                        'event': "TAG_BLOCK",
+                        'detail': ""})
     
     def filter_req_sort(e):
         return e['tsc']
@@ -216,20 +249,19 @@ def parse_ldb(executable, mreq):
     return filter_req, thread_list, min_tsc, max_tsc
 
 def parse_perf(thread_list, min_tsc, max_tsc):
-    print('Perf Data: perf.data')
-    if not os.path.exists("perf.data"):
-        print('  Cannot find perf.data')
+    print('Perf Data: {}'.format(PERF_DATA_FILENAME))
+    if not os.path.exists(PERF_DATA_FILENAME):
+        print('  Cannot find {}'.format(PERF_DATA_FILENAME))
         return []
 
-    if not os.path.exists("perf.dec"):
-        if os.system('sudo perf sched script --ns -F -comm > perf.dec') != 0:
+    if not os.path.exists(PERF_DEC_FILENAME):
+        if os.system('sudo perf sched script --ns -F -comm > {}'.format(PERF_DEC_FILENAME)) != 0:
             print('  [Error] Decoding perf failed. Please check the permission')
             return []
     
     row_in_time = []
-    with open("perf.dec", "r") as perf_dec_file:
+    with open(PERF_DEC_FILENAME, "r") as perf_dec_file:
         csv_reader = csv.reader(perf_dec_file, skipinitialspace=True, delimiter=' ')
-        prow = None
         for row in csv_reader:
             thread_id = int(row[0])
             cpu_id = int(row[1][1:-1])
@@ -239,6 +271,12 @@ def parse_perf(thread_list, min_tsc, max_tsc):
             bpf_output = " ".join(row[4:])
     
             skip = True
+
+            if timestamp_us < min_tsc:
+                continue
+
+            if timestamp_us > max_tsc:
+                break
     
             if thread_id in thread_list:
                 skip = False
@@ -250,26 +288,21 @@ def parse_perf(thread_list, min_tsc, max_tsc):
     
             if skip:
                 continue
-    
-            if timestamp_us > max_tsc:
-                break
-    
-            if timestamp_us < min_tsc:
-                prow = {'tsc': timestamp_us,
-                        'thread_id': thread_id,
-                        'cpu_id': cpu_id,
-                        'event': event,
-                        'bpf_output': bpf_output}
+
+            event_str = ""
+            if "sched:sched_switch" in event:
+                event_str = "SCHED_SWITCH"
+            elif "sched:sched_waking" in event:
+                event_str = "SCHED_WAKING"
+            elif "sched:sched_migrate_task" in event:
+                event_str = "SCHED_MIGRATE"
+            else:
                 continue
-    
-            if len(row_in_time) == 0 and prow != None:
-                row_in_time.append(prow)
-    
+
             row_in_time.append({'tsc': timestamp_us,
-                                'thread_id': thread_id,
-                                'cpu_id': cpu_id,
-                                'event': event,
-                                'bpf_output': bpf_output})
+                'thread_idx': thread_id,
+                'event': event_str,
+                'detail': "cpu_id={:d}, {}".format(cpu_id, bpf_output)})
     return row_in_time
 
 def generate_stats(executable, mreq):
@@ -286,34 +319,26 @@ def generate_stats(executable, mreq):
         le = filter_req[ldb_i]
         pe = row_in_time[perf_i]
         if le['tsc'] < pe['tsc']:
-            print("{:f} (+{:f}), {:d}, {:d}, {:f}, {} ({})"
-                    .format(le['tsc'], le['tsc'] - min_tsc, le['thread_idx'], le['ngen'],
-                        le['latency'], hex(le['pc']), le['finfo']))
+            print("{:f} (+{:f}) [{:d}] {} {}"
+                    .format(le['tsc'], le['tsc'] - min_tsc, le['thread_idx'],
+                        le['event'], le['detail']))
             ldb_i += 1
         else:
-            print("**  {:f} (+{:f}), {:d}, {:d}, {}, {}"
-                .format(pe['tsc'], pe['tsc'] - min_tsc, pe['thread_id'], pe['cpu_id'],
-                        pe['event'], pe['bpf_output']))
+            print("{:f} (+{:f}) [{:d}] {} {}"
+                .format(pe['tsc'], pe['tsc'] - min_tsc, pe['thread_idx'],
+                    pe['event'], pe['detail']))
             perf_i += 1
 
     for e in filter_req[ldb_i:]:
-        print("{:f} (+{:f}), {:d}, {:d}, {:f}, {} ({})"
-                .format(e['tsc'], e['tsc'] - min_tsc, e['thread_idx'], e['ngen'],
-                    e['latency'], hex(e['pc']), e['finfo']))
+        print("{:f} (+{:f}) [{:d}] {} {}"
+                .format(e['tsc'], e['tsc'] - min_tsc, e['thread_idx'], e['event'], e['detail']))
 
     for e in row_in_time[perf_i:]:
-        print("**  {:f} (+{:f}), {:d}, {:d}, {}, {}"
-              .format(e['tsc'], e['tsc'] - min_tsc, e['thread_id'], e['cpu_id'],
-                      e['event'], e['bpf_output']))
+        print("{:f} (+{:f}) [{:d}] {} {}"
+              .format(e['tsc'], e['tsc'] - min_tsc, e['thread_id'], e['event'], e['detail']))
 
 if __name__ == '__main__':
-    if len(sys.argv) < 3:
-        print('Expected usage: {0} <executable> <req#> <ldb raw output=ldb.data> <perf raw output=perf.data>'.format(sys.argv[0]))
+    if len(sys.argv) != 3:
+        print('Expected usage: {0} <executable> <req#>'.format(sys.argv[0]))
         sys.exit(1)
-    #addr = int(sys.argv[1], 0)
-    if len(sys.argv) > 3:
-        ldb_raw = argv[3]
-    if len(sys.argv) > 4:
-        perf_raw = argv[4]
     generate_stats(sys.argv[1], int(sys.argv[2]))
-    #process_file(sys.argv[2], addr)

@@ -19,35 +19,47 @@ sys.path[0:0] = ['.', '..']
 
 from elftools.common.py3compat import bytes2str
 
-def generate_stats(executable, ldb_raw):
+LDB_DATA_FILENAME = "ldb.data"
 
+def generate_stats(executable):
     start_us = {}
     finish_us = {}
-
+    thread_context = {} # thread_id -> tag
     # collect latency informations
-    with open(ldb_raw, 'r') as ldb_raw_file:
-        csv_reader = csv.reader(ldb_raw_file, delimiter=',')
-        for row in csv_reader:
-            if (len(row) != 7):
-                continue
-            #thread_id = int(row[1])
-            #tag = int(row[2])
-            #ngen = int(row[3])
-            timestamp = float(row[0])
-            timestamp_us = timestamp * 1000000
-            nreq = int(row[2])
-            latency = float(row[4])
-            latency_us = latency / 1000.0
-            pc = int(row[5],0)
+    with open(LDB_DATA_FILENAME, 'rb') as ldb_bin:
+        while (byte := ldb_bin.read(40)):
+            event_type = int.from_bytes(byte[0:4], "little")
+            ts_sec = int.from_bytes(byte[4:8], "little")
+            ts_nsec = int.from_bytes(byte[8:12], "little")
+            timestamp_us = ts_sec * 1000000 + ts_nsec / 1000.0
+            tid = int.from_bytes(byte[12:16], "little")
+            arg1 = int.from_bytes(byte[16:24], "little")
+            #arg2 = int.from_bytes(byte[24:32], "little")
+            #arg3 = int.from_bytes(byte[32:40], "little")
 
-            if nreq == 0:
-                continue
+            if event_type == 2: # tag set
+                tag = arg1
+                prev_tag = 0
+                if tid in thread_context:
+                    prev_tag = thread_context[tid]
 
-            if nreq in start_us:
-                finish_us[nreq] = max(finish_us[nreq], timestamp_us + latency_us)
-            else:
-                start_us[nreq] = timestamp_us
-                finish_us[nreq] = timestamp_us + latency_us
+                # mark finish
+                if prev_tag != 0:
+                    finish_us[prev_tag] = timestamp_us
+
+                # mark start
+                if tag != 0 and tag not in start_us:
+                    start_us[tag] = timestamp_us
+
+                thread_context[tid] = tag;
+
+            elif event_type == 3: # tag block
+                tag = arg1
+                # mark finish
+                if tag != 0:
+                    finish_us[tag] = timestamp_us
+
+                thread_context[tid] = 0
 
     latencies = []
     for nreq in start_us.keys():
@@ -63,12 +75,7 @@ def generate_stats(executable, ldb_raw):
         print("{:d}, {:f}".format(e['nreq'], e['latency']))
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print('Expected usage: {0} <executable> <ldb raw output=ldb.data>'.format(sys.argv[0]))
+    if len(sys.argv) != 2:
+        print('Expected usage: {0} <executable>'.format(sys.argv[0]))
         sys.exit(1)
-    #addr = int(sys.argv[1], 0)
-    ldb_raw = "ldb.data"
-    if len(sys.argv) > 2:
-        ldb_raw = argv[2]
-    generate_stats(sys.argv[1], ldb_raw)
-    #process_file(sys.argv[2], addr)
+    generate_stats(sys.argv[1])
