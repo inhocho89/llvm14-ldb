@@ -254,7 +254,8 @@ def parse_perf(thread_list, min_tsc, max_tsc):
         print('  Cannot find {}'.format(PERF_DATA_FILENAME))
         return []
 
-    if not os.path.exists(PERF_DEC_FILENAME):
+    if not os.path.exists(PERF_DEC_FILENAME) or \
+            os.stat(PERF_DEC_FILENAME).st_mtime < os.stat(PERF_DATA_FILENAME).st_mtime:
         if os.system('sudo perf sched script --ns -F -comm > {}'.format(PERF_DEC_FILENAME)) != 0:
             print('  [Error] Decoding perf failed. Please check the permission')
             return []
