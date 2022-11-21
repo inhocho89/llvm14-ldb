@@ -20,7 +20,6 @@ extern "C" {
 __attribute__((noinline)) void nested_worker(int level) {
   if (level == 0) {
     __time_delay_us(WORKER_US);
-//  usleep(0);
   } else {
     nested_worker(level-1);
   }
@@ -29,7 +28,7 @@ __attribute__((noinline)) void nested_worker(int level) {
 int main(int argc, char* argv[])
 {
   for (int i = 0; i < NSAMPLE; i++) {
-    ldb_tag_add(i+1);
+    ldb_tag_set(i+1);
     nested_worker(NEST_LEVEL);
     ldb_tag_clear();
   }
