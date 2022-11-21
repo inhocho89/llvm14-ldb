@@ -162,7 +162,7 @@ void *monitor_main(void *arg) {
       // Record finished function call
       for (int i = gidx; i < ldb_cnt[tidx]; ++i) {
         event_record(&ldb_shared->event, LDB_EVENT_STACK, now, thread_id, ldb_latency[tidx][i],
-            (uint64_t)ldb_rip[tidx][i], ldb_ngen[tidx][i]);
+            (uintptr_t)ldb_rip[tidx][i], ldb_ngen[tidx][i]);
       }
 
       // Add new nodes
