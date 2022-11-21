@@ -172,6 +172,8 @@ def parse_ldb(executable, mreq):
     nthread = 0
     min_tsc = 0
     max_tsc = 0
+    last_mutex_ts = {}
+    last_join_ts = {}
 
     # collect latency informations
     with open(LDB_DATA_FILENAME, 'rb') as ldb_bin:
@@ -212,7 +214,7 @@ def parse_ldb(executable, mreq):
                 filter_req.append({'tsc': timestamp_us,
                     'thread_idx': tid,
                     'event': "STACK_SAMPLE",
-                    'detail': "ngen={:d}, latency={:f}, pc={}({})"
+                    'detail': "ngen={:d}, latency={:f} us, pc={}({})"
                             .format(ngen, latency_us, hex(pc), finfo)})
 
             elif event_type == 2: # tag set
@@ -241,7 +243,69 @@ def parse_ldb(executable, mreq):
                         'thread_idx': tid,
                         'event': "TAG_BLOCK",
                         'detail': ""})
+
+            elif event_type == 4: # mutex wait
+                mutex = arg1
+                if tid in thread_context:
+                    filter_req.append({'tsc': timestamp_us,
+                        'thread_idx': tid,
+                        'event': "MUTEX_WAIT",
+                        'detail': "mutex={}".format(hex(mutex))})
+                    last_mutex_ts[tid] = timestamp_us
+
+            elif event_type == 5: # mutex lock
+                mutex = arg1
+                if tid in thread_context:
+                    wait_time = -1.0
+                    if tid in last_mutex_ts:
+                        wait_time = timestamp_us - last_mutex_ts[tid]
+                    filter_req.append({'tsc': timestamp_us,
+                        'thread_idx': tid,
+                        'event': "MUTEX_LOCK",
+                        'detail': "mutex={}, wait_time={:f} us"\
+                                .format(hex(mutex), wait_time)})
+                    last_mutex_ts[tid] = timestamp_us
+
+            elif event_type == 6: # mutex unlock
+                mutex = arg1
+                if tid in thread_context:
+                    lock_time = -1.0
+                    if tid in last_mutex_ts:
+                        lock_time = timestamp_us - last_mutex_ts[tid]
+                    filter_req.append({'tsc': timestamp_us,
+                        'thread_idx': tid,
+                        'event': "MUTEX_UNLOCK",
+                        'detail': "mutex={}, lock_time={:f} us"\
+                                .format(hex(mutex), lock_time)})
+                    if tid in last_mutex_ts:
+                        last_mutex_ts.pop(tid)
+
+            elif event_type == 7: # join wait
+                # TODO: convert pthread tid into linux tid
+                other_tid = arg1
+                if tid in thread_context:
+                    filter_req.append({'tsc': timestamp_us,
+                        'thread_idx': tid,
+                        'event': "JOIN_WAIT",
+                        'detail': "waiting_tid={}".format(tid)})
+                    last_join_ts[tid] = timestamp_us
+
+            elif event_type == 8: # join joined
+                # TODO: convert pthread tid into linux tid
+                other_tid = arg1
+                if tid in thread_context:
+                    wait_time = -1.0
+                    if tid in last_join_ts:
+                        wait_time = timestamp_us - last_join_ts[tid]
+                    filter_req.append({'tsc': timestamp_us,
+                        'thread_idx': tid,
+                        'event': "JOIN_JOINED",
+                        'detail': "joined_tid={}, wait_time={:f} us"\
+                                .format(tid, wait_time)})
+                    if tid in last_join_ts:
+                        last_join_ts.pop(tid)
     
+
     def filter_req_sort(e):
         return e['tsc']
 
