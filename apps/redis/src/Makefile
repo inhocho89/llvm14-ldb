@@ -3,7 +3,7 @@ CC = $(ROOT_PATH)/build/bin/clang
 LIBLDB = $(ROOT_PATH)/libldb/libldb.a
 
 LDB_LDFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer
-LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb -I$(ROOT_PATH)/include
+LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb -I$(ROOT_PATH)/libldb/include
 
 server_src = adlist.c quicklist.c ae.c anet.c dict.c server.c sds.c zmalloc.c lzf_c.c lzf_d.c pqsort.c zipmap.c sha1.c \
 						 ziplist.c release.c networking.c util.c object.c db.c replication.c rdb.c t_string.c t_list.c t_set.c \
