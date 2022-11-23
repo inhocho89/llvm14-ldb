@@ -27,70 +27,6 @@ MAPS_DATA_FILENAME = "maps.data"
 PERF_DATA_FILENAME = "perf.data"
 PERF_DEC_FILENAME = "perf.dec"
 
-def decode_funcname(dwarfinfo, address):
-    # Go over all DIEs in the DWARF information, looking for a subprogram
-    # entry with an address range that includes the given address. Note that
-    # this simplifies things by disregarding subprograms that may have
-    # split address ranges.
-    for CU in dwarfinfo.iter_CUs():
-        for DIE in CU.iter_DIEs():
-            try:
-                if DIE.tag == 'DW_TAG_subprogram':
-                    lowpc = DIE.attributes['DW_AT_low_pc'].value
-
-                    # DWARF v4 in section 2.17 describes how to interpret the
-                    # DW_AT_high_pc attribute based on the class of its form.
-                    # For class 'address' it's taken as an absolute address
-                    # (similarly to DW_AT_low_pc); for class 'constant', it's
-                    # an offset from DW_AT_low_pc.
-                    highpc_attr = DIE.attributes['DW_AT_high_pc']
-                    highpc_attr_class = describe_form_class(highpc_attr.form)
-                    if highpc_attr_class == 'address':
-                        highpc = highpc_attr.value
-                    elif highpc_attr_class == 'constant':
-                        highpc = lowpc + highpc_attr.value
-                    else:
-                        print('Error: invalid DW_AT_high_pc class:',
-                              highpc_attr_class)
-                        continue
-
-                    if lowpc <= address < highpc:
-                        return DIE.attributes['DW_AT_name'].value
-            except KeyError:
-                continue
-    return None
-
-
-def decode_file_line(dwarfinfo, address):
-    # Go over all the line programs in the DWARF information, looking for
-    # one that describes the given address.
-    for CU in dwarfinfo.iter_CUs():
-        # First, look at line programs to find the file/line for the address
-        lineprog = dwarfinfo.line_program_for_CU(CU)
-        prevstate = None
-        for entry in lineprog.get_entries():
-            # We're interested in those entries where a new state is assigned
-            if entry.state is None:
-                continue
-            # Looking for a range of addresses in two consecutive states that
-            # contain the required address.
-            if prevstate and prevstate.address <= address < entry.state.address:
-                filename = lineprog['file_entry'][prevstate.file - 1].name
-                line = prevstate.line
-                col = prevstate.column
-                return filename, line, col
-            if entry.state.end_sequence:
-                # For the state with `end_sequence`, `address` means the address
-                # of the first byte after the target machine instruction
-                # sequence and other information is meaningless. We clear
-                # prevstate so that it's not used in the next iteration. Address
-                # info is used in the above comparison to see if we need to use
-                # the line information for the prevstate.
-                prevstate = None
-            else:
-                prevstate = entry.state
-    return None, 0, 0
-
 def parse_elf(executable):
     if not os.path.exists(executable):
         print('  Cannot find executable: {}'.format(executable))
@@ -134,41 +70,129 @@ def parse_maps():
 
     return maps_arr
 
-def decode_dynamic(mapsinfo, address):
+def decode_funcname(dwarfinfo, address):
+    # Go over all DIEs in the DWARF information, looking for a subprogram
+    # entry with an address range that includes the given address. Note that
+    # this simplifies things by disregarding subprograms that may have
+    # split address ranges.
+    for CU in dwarfinfo.iter_CUs():
+        for DIE in CU.iter_DIEs():
+            try:
+                if DIE.tag == 'DW_TAG_subprogram':
+                    lowpc = DIE.attributes['DW_AT_low_pc'].value
+
+                    # DWARF v4 in section 2.17 describes how to interpret the
+                    # DW_AT_high_pc attribute based on the class of its form.
+                    # For class 'address' it's taken as an absolute address
+                    # (similarly to DW_AT_low_pc); for class 'constant', it's
+                    # an offset from DW_AT_low_pc.
+                    highpc_attr = DIE.attributes['DW_AT_high_pc']
+                    highpc_attr_class = describe_form_class(highpc_attr.form)
+                    if highpc_attr_class == 'address':
+                        highpc = highpc_attr.value
+                    elif highpc_attr_class == 'constant':
+                        highpc = lowpc + highpc_attr.value
+                    else:
+                        print('Error: invalid DW_AT_high_pc class:',
+                              highpc_attr_class)
+                        continue
+
+                    if lowpc <= address < highpc:
+                        return DIE.attributes['DW_AT_name'].value
+            except KeyError:
+                continue
+    return None
+
+def decode_file_line(dwarfinfo, addresses):
+    ret = {}
+    # Go over all the line programs in the DWARF information, looking for
+    # one that describes the given address.
+    for CU in dwarfinfo.iter_CUs():
+        # First, look at line programs to find the file/line for the address
+        lineprog = dwarfinfo.line_program_for_CU(CU)
+        prevstate = None
+        for entry in lineprog.get_entries():
+            # We're interested in those entries where a new state is assigned
+            if entry.state is None:
+                continue
+            # Looking for a range of addresses in two consecutive states that
+            # contain the required address.
+            if prevstate:
+                addrs = [x for x in addresses if prevstate.address <= x < entry.state.address]
+                for addr in addrs:
+                    ret[addr] = {'fname': lineprog['file_entry'][prevstate.file - 1].name,
+                            'line': prevstate.line,
+                            'col': prevstate.column}
+                    addresses.remove(addr)
+
+                if len(addresses) == 0:
+                    return ret
+            if entry.state.end_sequence:
+                # For the state with `end_sequence`, `address` means the address
+                # of the first byte after the target machine instruction
+                # sequence and other information is meaningless. We clear
+                # prevstate so that it's not used in the next iteration. Address
+                # info is used in the above comparison to see if we need to use
+                # the line information for the prevstate.
+                prevstate = None
+            else:
+                prevstate = entry.state
+    return ret
+
+def decode_dynamic(mapsinfo, addresses):
+    ret = {}
+    if len(addresses) == 0:
+        return ret
     for mi in mapsinfo:
-        if address >= mi['start'] and address < mi['finish']:
-            return mi['pathname'], mi['offset'] + (address - mi['start'])
+        addrs = [x for x in addresses if mi['start'] <= x < mi['finish']]
+        for addr in addrs:
+            ret[addr] = {'fname': mi['pathname'],
+                    'offset': mi['offset'] + (addr - mi['start'])}
+            addresses.remove(addr)
 
-    return None, 0
+        if len(addresses) == 0:
+            break
 
-def get_finfo(dwarfinfo, mapsinfo, address):
+    return ret
+
+def get_finfos(dwarfinfo, mapsinfo, addresses):
+    # remove duplicates
+    addresses = list(set(addresses))
+    addresses.sort()
+
+    finfomap = {}
+    # initialize finfomap
+    for addr in addresses:
+        finfomap[addr] = "???"
+
+    # nothing I can do without dwarfinfo
     if dwarfinfo == None:
-        return "???"
+        return finfomap
 
-    fname, line, col = decode_file_line(dwarfinfo, address)
+    # decode static addresses
+    ret = decode_file_line(dwarfinfo, addresses)
 
-    if fname != None:
-        return "{}:{:d}:{:d}".format(bytes2str(fname), line, col)
+    for key in ret:
+        finfomap[key] = "{}:{:d}:{:d}"\
+                .format(bytes2str(ret[key]['fname']), ret[key]['line'], ret[key]['col'])
 
-    if mapsinfo == None:
-        return "???"
+    # decode dynamic addresses
+    ret = decode_dynamic(mapsinfo, addresses)
 
-    fname, offset = decode_dynamic(mapsinfo, address)
+    for key in ret:
+        finfomap[key] = "{}+{}".format(ret[key]['fname'], hex(ret[key]['offset']))
 
-    if fname != None:
-        return "{}+{}".format(fname, hex(offset))
-
-    return "???"
+    return finfomap
 
 def parse_ldb(executable, mreq):
     print('LDB Data: {}'.format(LDB_DATA_FILENAME))
     dwarfinfo = parse_elf(executable)
     mapsinfo = parse_maps()
 
-    filter_req = []     # list of related event entries
+    events = []         # list of related event entries
     thread_list = []    # list of thread related to mreq
     thread_watch = []   # list of thread to watch
-    finfo_cache = {}
+    pcs = []
     nthread = 0
     min_tsc = 0
     max_tsc = 0
@@ -211,7 +235,8 @@ def parse_ldb(executable, mreq):
                     event_str = "STACK_SAMPLE"
                     detail_str = "ngen={:d}, latency={:f} us"\
                             .format(ngen, latency_us)
-                elif mutex_waiting != 0 and tid == mutex_holder[mutex_waiting]:
+                elif mutex_waiting != 0 and mutex_waiting in mutex_holder and \
+                        tid == mutex_holder[mutex_waiting]:
                     # mutex holder's event
                     event_str = "***MHOLDER_STACK_SAMPLE"
                     detail_str = "mutex={}, ngen={:d}, latency={:f} us"\
@@ -220,32 +245,37 @@ def parse_ldb(executable, mreq):
                     continue
 
                 pc -= 5
-                if pc not in finfo_cache:
-                    finfo_cache[pc] = get_finfo(dwarfinfo, mapsinfo, pc)
+#                if pc not in finfo_cache:
+#                    finfo_cache[pc] = get_finfo(dwarfinfo, mapsinfo, pc)
+#
+#                finfo = finfo_cache[pc]
+#
+#                detail_str += ", pc={}({})".format(hex(pc), finfo)
 
-                finfo = finfo_cache[pc]
-
-                detail_str += ", pc={}({})".format(hex(pc), finfo)
-
-                filter_req.append({'tsc': timestamp_us,
+                events.append({'tsc': timestamp_us,
                     'thread_idx': tid,
+                    'pc': pc,
                     'event': event_str,
                     'detail': detail_str})
+                if pc not in pcs:
+                    pcs.append(pc)
 
             elif event_type == 2: # tag set
                 tag = arg1
 
                 if tag != mreq and tid in thread_watch:
                     thread_watch.remove(tid)
-                    filter_req.append({'tsc': timestamp_us,
+                    events.append({'tsc': timestamp_us,
                         'thread_idx': tid,
+                        'pc': 0,
                         'event': "TAG_UNSET",
                         'detail': "new_tag={:d}".format(tag)})
 
                 if tag == mreq and tid not in thread_watch:
                     thread_watch.append(tid)
-                    filter_req.append({'tsc': timestamp_us,
+                    events.append({'tsc': timestamp_us,
                         'thread_idx': tid,
+                        'pc': 0,
                         'event': "TAG_SET",
                         'detail': ""})
 
@@ -254,16 +284,18 @@ def parse_ldb(executable, mreq):
                 
                 if tag == mreq and tid in thread_watch:
                     thread_watch.remove(tid)
-                    filter_req.append({'tsc': timestamp_us,
+                    events.append({'tsc': timestamp_us,
                         'thread_idx': tid,
+                        'pc': 0,
                         'event': "TAG_BLOCK",
                         'detail': ""})
 
             elif event_type == 4: # mutex wait
                 mutex = arg1
                 if tid in thread_watch:
-                    filter_req.append({'tsc': timestamp_us,
+                    events.append({'tsc': timestamp_us,
                         'thread_idx': tid,
+                        'pc': 0,
                         'event': "MUTEX_WAIT",
                         'detail': "mutex={}".format(hex(mutex))})
                     last_mutex_ts[tid] = timestamp_us
@@ -275,8 +307,9 @@ def parse_ldb(executable, mreq):
                     wait_time = -1.0
                     if tid in last_mutex_ts:
                         wait_time = timestamp_us - last_mutex_ts[tid]
-                    filter_req.append({'tsc': timestamp_us,
+                    events.append({'tsc': timestamp_us,
                         'thread_idx': tid,
+                        'pc': 0,
                         'event': "MUTEX_LOCK",
                         'detail': "mutex={}, wait_time={:f} us"\
                                 .format(hex(mutex), wait_time)})
@@ -291,8 +324,9 @@ def parse_ldb(executable, mreq):
                     lock_time = -1.0
                     if tid in last_mutex_ts:
                         lock_time = timestamp_us - last_mutex_ts[tid]
-                    filter_req.append({'tsc': timestamp_us,
+                    events.append({'tsc': timestamp_us,
                         'thread_idx': tid,
+                        'pc': 0,
                         'event': "MUTEX_UNLOCK",
                         'detail': "mutex={}, lock_time={:f} us"\
                                 .format(hex(mutex), lock_time)})
@@ -305,8 +339,9 @@ def parse_ldb(executable, mreq):
                 # TODO: convert pthread tid into linux tid
                 other_tid = arg1
                 if tid in thread_watch:
-                    filter_req.append({'tsc': timestamp_us,
+                    events.append({'tsc': timestamp_us,
                         'thread_idx': tid,
+                        'pc': 0,
                         'event': "JOIN_WAIT",
                         'detail': "waiting_tid={}".format(tid)})
                     last_join_ts[tid] = timestamp_us
@@ -318,20 +353,29 @@ def parse_ldb(executable, mreq):
                     wait_time = -1.0
                     if tid in last_join_ts:
                         wait_time = timestamp_us - last_join_ts[tid]
-                    filter_req.append({'tsc': timestamp_us,
+                    events.append({'tsc': timestamp_us,
                         'thread_idx': tid,
+                        'pc': 0,
                         'event': "JOIN_JOINED",
                         'detail': "joined_tid={}, wait_time={:f} us"\
                                 .format(tid, wait_time)})
                     if tid in last_join_ts:
                         last_join_ts.pop(tid)
     
+    # parse pcs
+    finfomap = get_finfos(dwarfinfo, mapsinfo, pcs)
 
-    def filter_req_sort(e):
+    # update event detail
+    for e in events:
+        if e['pc'] == 0:
+            continue
+        e['detail'] += ", pc={}({})".format(hex(e['pc']), finfomap[e['pc']])
+
+    def events_sort(e):
         return e['tsc']
 
-    filter_req.sort(key=filter_req_sort)
-    return filter_req, thread_list, min_tsc, max_tsc
+    events.sort(key=events_sort)
+    return events, thread_list, min_tsc, max_tsc
 
 def parse_perf(thread_list, min_tsc, max_tsc):
     print('Perf Data: {}'.format(PERF_DATA_FILENAME))
