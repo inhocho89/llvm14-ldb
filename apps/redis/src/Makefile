@@ -1,9 +1,9 @@
 ROOT_PATH=../../llvm14-ldb
 CC = $(ROOT_PATH)/build/bin/clang
-LDBINIT = $(ROOT_PATH)/libldb/ldb_init.o
+LIBLDB = $(ROOT_PATH)/libldb/libldb.a
 
 LDB_LDFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer
-LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb
+LDB_CCFLAGS = -g -fdebug-default-version=3 -fno-omit-frame-pointer -I$(ROOT_PATH)/libldb -I$(ROOT_PATH)/include
 
 server_src = adlist.c quicklist.c ae.c anet.c dict.c server.c sds.c zmalloc.c lzf_c.c lzf_d.c pqsort.c zipmap.c sha1.c \
 						 ziplist.c release.c networking.c util.c object.c db.c replication.c rdb.c t_string.c t_list.c t_set.c \
@@ -18,8 +18,8 @@ server_obj = $(server_src:.c=.o)
 
 all: redis-server
 
-redis-server: $(server_obj) $(LDBINIT)
-	$(CC) $(LDB_LDFLAGS) -flto -g -ggdb -rdynamic -o redis-server $(server_obj) $(LDBINIT) ../deps/hiredis/libhiredis.a \
+redis-server: $(server_obj) $(LIBLDB)
+	$(CC) $(LDB_LDFLAGS) -flto -g -ggdb -rdynamic -o redis-server $(server_obj) $(LIBLDB) ../deps/hiredis/libhiredis.a \
 		../deps/lua/src/liblua.a ../deps/hdr_histogram/libhdrhistogram.a ../deps/fpconv/libfpconv.a ../deps/jemalloc/lib/libjemalloc.a \
 	 	-lm -ldl -pthread -lrt
 
