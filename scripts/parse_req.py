@@ -111,6 +111,10 @@ def decode_file_line(dwarfinfo, addresses):
         # First, look at line programs to find the file/line for the address
         lineprog = dwarfinfo.line_program_for_CU(CU)
         prevstate = None
+        offset = 1
+        if len(lineprog['file_entry']) > 1 and \
+                lineprog['file_entry'][0] == lineprog['file_entry'][1]:
+            offset = 0
         for entry in lineprog.get_entries():
             # We're interested in those entries where a new state is assigned
             if entry.state is None:
@@ -120,7 +124,7 @@ def decode_file_line(dwarfinfo, addresses):
             if prevstate:
                 addrs = [x for x in addresses if prevstate.address <= x < entry.state.address]
                 for addr in addrs:
-                    ret[addr] = {'fname': lineprog['file_entry'][prevstate.file - 1].name,
+                    ret[addr] = {'fname': lineprog['file_entry'][prevstate.file - offset].name,
                             'line': prevstate.line,
                             'col': prevstate.column}
                     addresses.remove(addr)
