@@ -26,3 +26,18 @@ void event_record(ldb_event_buffer_t *ebuf, int event_type, struct timespec ts,
 
   ebuf->tail = (ebuf->tail + 1) % LDB_EVENT_BUF_SIZE;
 }
+
+inline void event_record_now(int event_type, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
+  // attach shared memory
+  if (unlikely(!ldb_shared)) {
+    ldb_shared = attach_shared_memory();
+  }
+
+  struct timespec now;
+  int tinfo_idx = get_thread_info_idx();
+  ldb_thread_info_t *tinfo = &ldb_shared->ldb_thread_infos[tinfo_idx];
+
+  clock_gettime(CLOCK_MONOTONIC, &now);
+
+  event_record(tinfo->ebuf, event_type, now, tinfo->id, arg1, arg2, arg3);
+}

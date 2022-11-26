@@ -17,6 +17,8 @@
 #define LDB_EVENT_BUF_SIZE 400000
 #define LDB_CANARY 0xDEADBEEF
 
+#define LDB_MUTEX_EVENT_THRESH_NS 1000
+
 #define barrier() asm volatile("" ::: "memory")
 #define CAS(x,y,z) __sync_bool_compare_and_swap(x,y,z)
 
@@ -59,6 +61,8 @@ typedef struct {
   pid_t id;
   char **fsbase;
   char *stackbase;
+  struct timespec ts_wait;
+  struct timespec ts_lock;
   ldb_event_buffer_t *ebuf;
 } ldb_thread_info_t;
 
@@ -143,3 +147,4 @@ inline __attribute__((always_inline)) ldb_shmseg *attach_shared_memory() {
 /* Event logging functions */
 void event_record(ldb_event_buffer_t *event, int event_type, struct timespec ts,
 		uint32_t tid, uint64_t arg1, uint64_t arg2, uint64_t arg3);
+void event_record_now(int event_type, uint64_t arg1, uint64_t arg2, uint64_t arg3);

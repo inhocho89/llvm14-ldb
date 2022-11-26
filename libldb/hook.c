@@ -35,11 +35,13 @@ void __ldbInit(void) {
   memset(ebuf, 0, sizeof(ldb_event_buffer_t));
   ebuf->events = (ldb_event_entry *)malloc(sizeof(ldb_event_entry) * LDB_EVENT_BUF_SIZE);
 
-  // Update main thread's info
+  // initialize main thread's info
   ldb_shared->ldb_thread_infos[0].id = syscall(SYS_gettid);
   ldb_shared->ldb_thread_infos[0].fsbase = (char **)(rdfsbase());
   ldb_shared->ldb_thread_infos[0].stackbase = rbp;
   ldb_shared->ldb_thread_infos[0].ebuf = ebuf;
+  clock_gettime(CLOCK_MONOTONIC, &ldb_shared->ldb_thread_infos[0].ts_wait);
+  clock_gettime(CLOCK_MONOTONIC, &ldb_shared->ldb_thread_infos[0].ts_lock);
 
   ldb_shared->ldb_nthread = 1;
   ldb_shared->ldb_max_idx = 1;
