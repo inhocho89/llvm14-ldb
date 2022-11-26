@@ -30,21 +30,23 @@ void __ldbInit(void) {
   ldb_shared->ldb_thread_infos = (ldb_thread_info_t *)malloc(sizeof(ldb_thread_info_t) * LDB_MAX_NTHREAD);
   memset(ldb_shared->ldb_thread_infos, 0, sizeof(ldb_thread_info_t) * LDB_MAX_NTHREAD);
 
-  // Set main thread's fsbase
+  // allocate & initialize event buffer
+  ldb_event_buffer_t *ebuf = (ldb_event_buffer_t *)malloc(sizeof(ldb_event_buffer_t));
+  memset(ebuf, 0, sizeof(ldb_event_buffer_t));
+  ebuf->events = (ldb_event_entry *)malloc(sizeof(ldb_event_entry) * LDB_EVENT_BUF_SIZE);
+
+  // Update main thread's info
   ldb_shared->ldb_thread_infos[0].id = syscall(SYS_gettid);
   ldb_shared->ldb_thread_infos[0].fsbase = (char **)(rdfsbase());
   ldb_shared->ldb_thread_infos[0].stackbase = rbp;
+  ldb_shared->ldb_thread_infos[0].ebuf = ebuf;
+
   ldb_shared->ldb_nthread = 1;
   ldb_shared->ldb_max_idx = 1;
 
-  pthread_spin_init(&ldb_shared->ldb_tlock, PTHREAD_PROCESS_SHARED);
+  register_thread_info(0);
 
-  // initialize event buffer
-  ldb_shared->event.head = 0;
-  ldb_shared->event.tail = 0;
-  ldb_shared->event.commit = 0;
-  ldb_shared->event.nignored = 0;
-  ldb_shared->event.events = (ldb_event_entry *)malloc(LDB_EVENT_BUF_SIZE * sizeof(ldb_event_entry));
+  pthread_spin_init(&ldb_shared->ldb_tlock, PTHREAD_PROCESS_SHARED);
 
   running = true;
 
@@ -67,8 +69,9 @@ void __ldbExit(void) {
   pthread_join(monitor_th, &ret);
   pthread_join(logger_th, &ret);
 
+  free(ldb_shared->ldb_thread_infos[0].ebuf->events);
+  free(ldb_shared->ldb_thread_infos[0].ebuf);
   free(ldb_shared->ldb_thread_infos);
-  free(ldb_shared->event.events);
 
   shmdt(ldb_shared);
 }

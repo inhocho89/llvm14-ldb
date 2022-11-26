@@ -27,13 +27,6 @@
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #endif
 
-typedef struct {
-  pid_t id;
-  char **fsbase;
-  char *stackbase;
-  char pad[8];
-} ldb_thread_info_t;
-
 enum ldb_event_type{
   LDB_EVENT_STACK = 1,
   LDB_EVENT_TAG_SET,
@@ -58,18 +51,22 @@ typedef struct {
 typedef struct {
   int head;   // current read index
   int tail;   // current write index
-  int commit; // maximum safe index to read
-  time_t last_write;
   uint64_t nignored;
   ldb_event_entry *events;
-} ldb_event_handle_t;
+} ldb_event_buffer_t;
+
+typedef struct {
+  pid_t id;
+  char **fsbase;
+  char *stackbase;
+  ldb_event_buffer_t *ebuf;
+} ldb_thread_info_t;
 
 typedef struct {
   ldb_thread_info_t *ldb_thread_infos;
   int ldb_nthread;
   int ldb_max_idx;
   pthread_spinlock_t ldb_tlock;
-  ldb_event_handle_t event;
 } ldb_shmseg;
 
 // Helper functions
@@ -123,6 +120,18 @@ inline __attribute__((always_inline)) void setup_canary() {
   __asm volatile ("movq %0, %%fs:-24 \n\t" :: "r"(tag): "memory");
 }
 
+inline __attribute__((always_inline)) void register_thread_info(int idx) {
+  __asm volatile ("mov %0, %%fs:-32 \n\t" :: "r"(idx): "memory");
+}
+
+inline __attribute__((always_inline)) pid_t get_thread_info_idx() {
+  int idx;
+
+  __asm volatile ("mov %%fs:-32, %0 \n\t" : "=r"(idx) :: "memory");
+
+  return idx;
+}
+
 /* shared memory related functions */
 inline __attribute__((always_inline)) ldb_shmseg *attach_shared_memory() {
   int shmid = shmget(SHM_KEY, sizeof(ldb_shmseg), 0666);
@@ -131,17 +140,6 @@ inline __attribute__((always_inline)) ldb_shmseg *attach_shared_memory() {
   return ldb_shared;
 }
 
-/* Event related functions */
-
-
-void event_record(ldb_event_handle_t *event, int event_type, struct timespec ts,
+/* Event logging functions */
+void event_record(ldb_event_buffer_t *event, int event_type, struct timespec ts,
 		uint32_t tid, uint64_t arg1, uint64_t arg2, uint64_t arg3);
-
-static inline void
-event_record_now(ldb_event_handle_t *event, int event_type,
-                 uint64_t arg1, uint64_t arg2, uint64_t arg3) {
-  struct timespec now;
-  pid_t thread_id = syscall(SYS_gettid);
-  clock_gettime(CLOCK_MONOTONIC, &now);
-  event_record(event, event_type, now, thread_id, arg1, arg2, arg3);
-}

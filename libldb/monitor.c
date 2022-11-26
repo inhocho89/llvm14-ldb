@@ -33,8 +33,6 @@ void *monitor_main(void *arg) {
   struct timespec now;
   uint64_t elapsed;
 
-  uint64_t nupdate = 0;
-
   // allocate memory for bookkeeping
   ldb_tag = (uint32_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint32_t *));
   ldb_ngen = (uint64_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint64_t *));
@@ -53,9 +51,10 @@ void *monitor_main(void *arg) {
 
   memset(ldb_cnt, 0, sizeof(int) * LDB_MAX_NTHREAD);
 
+  ldb_event_buffer_t *ebuf = ldb_shared->ldb_thread_infos[get_thread_info_idx()].ebuf;
+
   clock_gettime(CLOCK_MONOTONIC, &start_ts);
   last_ts = start_ts;
-
 
   printf("Monitor thread starts\n");
   
@@ -68,8 +67,9 @@ void *monitor_main(void *arg) {
 
     for (int tidx = 0; tidx < ldb_shared->ldb_max_idx; ++tidx) {
       // Skip if fsbase is invalid
-      if (ldb_shared->ldb_thread_infos[tidx].fsbase == NULL)
+      if (ldb_shared->ldb_thread_infos[tidx].fsbase == NULL) {
         continue;
+      }
 
       pid_t thread_id = ldb_shared->ldb_thread_infos[tidx].id;
       char ***fsbase = &(ldb_shared->ldb_thread_infos[tidx].fsbase);
@@ -136,8 +136,9 @@ void *monitor_main(void *arg) {
       }
 
       // No data collected
-      if (lidx == 0)
+      if (lidx == 0) {
         continue;
+      }
 
       // Update latency
       int gidx = 0;
@@ -161,7 +162,7 @@ void *monitor_main(void *arg) {
 
       // Record finished function call
       for (int i = gidx; i < ldb_cnt[tidx]; ++i) {
-        event_record(&ldb_shared->event, LDB_EVENT_STACK, now, thread_id, ldb_latency[tidx][i],
+        event_record(ebuf, LDB_EVENT_STACK, now, thread_id, ldb_latency[tidx][i],
             (uintptr_t)ldb_rip[tidx][i], ldb_ngen[tidx][i]);
       }
 
@@ -184,7 +185,6 @@ void *monitor_main(void *arg) {
       ldb_cnt[tidx] = gidx;
     } // for
 
-    nupdate++;
     last_ts = now;
 
 #if LDB_MONITOR_PERIOD > 0
@@ -209,7 +209,7 @@ void *monitor_main(void *arg) {
   free(ldb_latency);
   free(ldb_cnt);
 
-  printf("Monitoring thread exiting... %lu datapoints ignored.\n", ldb_shared->event.nignored);
+  printf("Monitoring thread exiting...\n");
 
   return NULL;
 }

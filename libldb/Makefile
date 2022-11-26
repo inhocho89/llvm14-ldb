@@ -21,7 +21,7 @@ hook.o: hook.c
 	$(CC) $(LDB_CFLAGS) -o $@ -c $<
 
 logger.o: logger.c
-	$(CC) $(LDB_CFLAGS) -o $@ -c $<
+	$(CC) $(LDB_CFLAGS) -I./include -o $@ -c $<
 
 monitor.o: monitor.c
 	$(CC) $(LDB_CFLAGS) -o $@ -c $<

@@ -1,27 +1,20 @@
 #include "common.h"
 
-void event_record(ldb_event_handle_t *event, int event_type, struct timespec ts,
+extern ldb_shmseg *ldb_shared;
+
+void event_record(ldb_event_buffer_t *ebuf, int event_type, struct timespec ts,
     uint32_t tid, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
-  int head_;
-  int tail_;
-  int next_tail_;
-  int len;
 
-  do {
-    head_ = event->head;
-    tail_ = event->tail;
-    next_tail_ = (tail_ + 1) % LDB_EVENT_BUF_SIZE;
+  if (unlikely(!ebuf || !ebuf->events))
+    return;
 
-    // ignore the data point if queue is full
-    if (next_tail_ == head_) {
-      fprintf(stderr, "[WARNING] event buffer full: data point ignored\n");
-      event->nignored++;
-      return;
-    }
-  } while (!CAS(&event->tail, tail_, next_tail_));
+  if ((ebuf->tail + 1) % LDB_EVENT_BUF_SIZE == ebuf->head) {
+    //fprintf(stderr, "[%d] WARNING: event buffer full: event ignored\n", syscall(SYS_gettid));
+    ebuf->nignored++;
+    return;
+  }
 
-  // I own tail_
-  ldb_event_entry *e = &event->events[tail_];
+  ldb_event_entry *e = &ebuf->events[ebuf->tail];
 
   e->event_type = event_type;
   e->sec = ts.tv_sec;
@@ -31,8 +24,5 @@ void event_record(ldb_event_handle_t *event, int event_type, struct timespec ts,
   e->arg2 = arg2;
   e->arg3 = arg3;
 
-  // write complete. Let's commit
-  while (!CAS(&event->commit, tail_, next_tail_)) {
-    continue;
-  }
+  ebuf->tail = (ebuf->tail + 1) % LDB_EVENT_BUF_SIZE;
 }

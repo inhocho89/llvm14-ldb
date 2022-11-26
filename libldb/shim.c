@@ -28,7 +28,7 @@ static inline __attribute__((always_inline)) uint64_t get_ngen() {
   return ngen;
 }
 
-inline int get_tidx(ldb_shmseg *ldb_shared) {
+static inline int get_tidx() {
   // find reusable slot
   for (int i = 0; i < ldb_shared->ldb_max_idx; ++i) {
     if (ldb_shared->ldb_thread_infos[i].fsbase == NULL) {
@@ -44,14 +44,29 @@ inline int get_tidx(ldb_shmseg *ldb_shared) {
   return (ldb_shared->ldb_max_idx - 1);
 }
 
-inline void put_tidx(ldb_shmseg *ldb_shared, int tidx) {
-  ldb_shared->ldb_thread_infos[tidx].fsbase = NULL;
+static inline void put_tidx(int tidx) {
+  memset(&ldb_shared->ldb_thread_infos[tidx], 0, sizeof(ldb_thread_info_t));
 
   // This is the last slot
   if (tidx == ldb_shared->ldb_max_idx - 1) {
     ldb_shared->ldb_max_idx--;
   }
   ldb_shared->ldb_nthread--;
+}
+
+static inline void event_record_now(int event_type, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
+  // attach shared memory
+  if (unlikely(!ldb_shared)) {
+    ldb_shared = attach_shared_memory();
+  }
+
+  struct timespec now;
+  int tinfo_idx = get_thread_info_idx();
+  ldb_thread_info_t *tinfo = &ldb_shared->ldb_thread_infos[tinfo_idx];
+
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  
+  event_record(tinfo->ebuf, event_type, now, tinfo->id, arg1, arg2, arg3);
 }
 
 /* pthread-related functions */
@@ -85,21 +100,37 @@ void *__ldb_thread_start(void *arg) {
     ldb_shared = attach_shared_memory();
   }
 
+  // allocate & initialize event buffer
+  ldb_event_buffer_t *ebuf = (ldb_event_buffer_t *)malloc(sizeof(ldb_event_buffer_t));
+  memset(ebuf, 0, sizeof(ldb_event_buffer_t));
+  ebuf->events = (ldb_event_entry *)malloc(sizeof(ldb_event_entry) * LDB_EVENT_BUF_SIZE);
+  if (ebuf->events == 0) {
+    fprintf(stderr, "\tmalloc() failed\n");
+  }
+
   // start tracking
   pthread_spin_lock(&(ldb_shared->ldb_tlock));
-  tidx = get_tidx(ldb_shared);
+  tidx = get_tidx();
   ldb_shared->ldb_thread_infos[tidx].id = syscall(SYS_gettid);
   ldb_shared->ldb_thread_infos[tidx].fsbase = (char **)(rdfsbase());
   ldb_shared->ldb_thread_infos[tidx].stackbase = rbp;
+  ldb_shared->ldb_thread_infos[tidx].ebuf = ebuf;
   pthread_spin_unlock(&(ldb_shared->ldb_tlock));
+
+  register_thread_info(tidx);
 
   // execute real thread
   ret = real_thread_params.worker_func(real_thread_params.param);
 
   // stop tracking
   pthread_spin_lock(&(ldb_shared->ldb_tlock));
-  put_tidx(ldb_shared, tidx);
+  put_tidx(tidx);
   pthread_spin_unlock(&(ldb_shared->ldb_tlock));
+
+  printf("Application thread is exitting... %lu data point ignored\n", ebuf->nignored);
+
+  free(ebuf->events);
+  free(ebuf);
 
   return ret;
 }
@@ -144,10 +175,10 @@ int pthread_join(pthread_t thread, void **retval) {
   }
 
   // pthread_t -> tid mapping should be stored at pthread_create
-  event_record_now(&ldb_shared->event, LDB_EVENT_JOIN_WAIT, (uint64_t)thread, 0, 0);
+  event_record_now(LDB_EVENT_JOIN_WAIT, (uint64_t)thread, 0, 0);
   ret = real_pthread_join(thread, retval);
   if (likely(ret == 0)) {
-    event_record_now(&ldb_shared->event, LDB_EVENT_JOIN_JOINED, (uint64_t)thread, 0, 0);
+    event_record_now(LDB_EVENT_JOIN_JOINED, (uint64_t)thread, 0, 0);
   }
 
   return ret;
@@ -165,16 +196,13 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
       return -1;
     }
   }
+  event_record_now(LDB_EVENT_MUTEX_WAIT, (uintptr_t)mutex, 0, 0);
 
-  if (likely(ldb_shared)) {
-    event_record_now(&ldb_shared->event, LDB_EVENT_MUTEX_WAIT, (uintptr_t)mutex, 0, 0);
-  }
   ret = real_pthread_mutex_lock(mutex);
 
-  if (likely(ldb_shared && ret == 0)) {
-    event_record_now(&ldb_shared->event, LDB_EVENT_MUTEX_LOCK, (uintptr_t)mutex, 0, 0);
-  } // else record fail?
-
+  if (likely(ret == 0)) {
+    event_record_now(LDB_EVENT_MUTEX_LOCK, (uintptr_t)mutex, 0, 0);
+  }
   return ret;
 }
 
@@ -193,8 +221,8 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex) {
 
   ret = real_pthread_mutex_unlock(mutex);
 
-  if (likely(ldb_shared && ret == 0)) {
-    event_record_now(&ldb_shared->event, LDB_EVENT_MUTEX_UNLOCK, (uintptr_t)mutex, 0, 0);
+  if (likely(ret == 0)) {
+    event_record_now(LDB_EVENT_MUTEX_UNLOCK, (uintptr_t)mutex, 0, 0);
   }
 
   return ret;
@@ -215,8 +243,8 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex) {
 
   ret = real_pthread_mutex_trylock(mutex);
 
-  if (likely(ldb_shared) && ret == 0) {
-    event_record_now(&ldb_shared->event, LDB_EVENT_MUTEX_LOCK, (uintptr_t)mutex, 0, 0);
+  if (ret == 0) {
+    event_record_now(LDB_EVENT_MUTEX_LOCK, (uintptr_t)mutex, 0, 0);
   }
 
   return ret;
