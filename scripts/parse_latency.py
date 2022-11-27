@@ -1,30 +1,23 @@
-#-------------------------------------------------------------------------------
-# elftools example: dwarf_decode_address.py
-#
-# Decode an address in an ELF file to find out which function it belongs to
-# and from which filename/line it comes in the original source file.
-#
-# Eli Bendersky (eliben@gmail.com)
-# This code is in the public domain
-#-------------------------------------------------------------------------------
 from __future__ import print_function
 import sys
-import csv
-import copy
-import math
-
-# If pyelftools is not installed, the example can also run from the root or
-# examples/ dir of the source distribution.
-sys.path[0:0] = ['.', '..']
-
-from elftools.common.py3compat import bytes2str
 
 LDB_DATA_FILENAME = "ldb.data"
 
-def generate_stats(executable):
+EVENT_STACK_SAMPLE = 1
+EVENT_TAG_SET = 2
+EVENT_TAG_BLOCK = 3
+EVENT_TAG_UNSET = 4
+EVENT_TAG_CLEAR = 5
+EVENT_MUTEX_WAIT = 6
+EVENT_MUTEX_LOCK = 7
+EVENT_MUTEX_UNLOCK = 8
+EVENT_JOIN_WAIT = 9
+EVENT_JOIN_JOINED = 10
+
+def generate_stats():
     start_us = {}
-    finish_us = {}
-    thread_context = {} # thread_id -> tag
+    active_tags = {}
+    latencies = []
     # collect latency informations
     with open(LDB_DATA_FILENAME, 'rb') as ldb_bin:
         while (byte := ldb_bin.read(40)):
@@ -37,34 +30,47 @@ def generate_stats(executable):
             #arg2 = int.from_bytes(byte[24:32], "little")
             #arg3 = int.from_bytes(byte[32:40], "little")
 
-            if event_type == 2: # tag set
+            if event_type == EVENT_TAG_SET:
                 tag = arg1
-                prev_tag = 0
-                if tid in thread_context:
-                    prev_tag = thread_context[tid]
 
-                # mark finish
-                if prev_tag != 0:
-                    finish_us[prev_tag] = timestamp_us
+                if tag == 0:
+                    continue
 
-                # mark start
-                if tag != 0 and tag not in start_us:
+                # first set
+                if tag not in active_tags:
                     start_us[tag] = timestamp_us
+                    active_tags[tag] = []
 
-                thread_context[tid] = tag;
+                active_tags[tag].append(tid)
 
-            elif event_type == 3: # tag block
+            elif event_type == EVENT_TAG_UNSET:
                 tag = arg1
-                # mark finish
-                if tag != 0:
-                    finish_us[tag] = timestamp_us
 
-                thread_context[tid] = 0
+                if tag == 0 or tag not in active_tags:
+                    continue
 
-    latencies = []
-    for nreq in start_us.keys():
-        latencies.append({'nreq': nreq,
-                          'latency': finish_us[nreq]-start_us[nreq]})
+                if tid in active_tags[tag]:
+                    active_tags[tag].remove(tid)
+
+                # last unset
+                if len(active_tags[tag]) == 0:
+                    latencies.append({'nreq': tag,
+                        'latency': timestamp_us - start_us[tag]})
+
+                    active_tags.pop(tag)
+
+            elif event_type == EVENT_TAG_CLEAR:
+                for tag in list(active_tags.keys()):
+
+                    if tid in active_tags[tag]:
+                        active_tags[tag].remove(tid)
+
+                    # last unset
+                    if len(active_tags[tag]) == 0:
+                        latencies.append({'nreq': tag,
+                            'latency': timestamp_us - start_us[tag]})
+
+                        active_tags.pop(tag)
 
     def filter_req_sort(e):
         return e['latency']
@@ -75,7 +81,7 @@ def generate_stats(executable):
         print("{:d}, {:f}".format(e['nreq'], e['latency']))
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        print('Expected usage: {0} <executable>'.format(sys.argv[0]))
+    if len(sys.argv) != 1:
+        print('Expected usage: {0}'.format(sys.argv[0]))
         sys.exit(1)
-    generate_stats(sys.argv[1])
+    generate_stats()

@@ -24,7 +24,6 @@ from elftools.elf.elffile import ELFFile
 
 LDB_DATA_FILENAME = "ldb.data"
 
-
 def parse_elf(executable):
     if not os.path.exists(executable):
         print('  Cannot find executable: {}'.format(executable))
@@ -202,6 +201,7 @@ def generate_stats(executable):
             event_type = int.from_bytes(byte[0:4], "little")
             #ts_sec = int.from_bytes(byte[4:8], "little")
             #ts_nsec = int.from_bytes(byte[8:12], "little")
+            #timestamp_us = ts_sec * 1000000 + ts_nsec / 1000.0
             #tid = int.from_bytes(byte[12:16], "little")
             latency = int.from_bytes(byte[16:24], "little") / 1000.0
             pc = int.from_bytes(byte[24:32], "little")
@@ -223,8 +223,9 @@ def generate_stats(executable):
         N = len(larr)
         if larr[N-1] == 0.0:
             continue
-        latencies_ordered.append({'pc': pc, 'num_samples': N, 'median': larr[int(N * 0.5)],
-            '90p': larr[int(N * 0.9)], '99p': larr[int(N * 0.99)], '999p': larr[int(N * 0.999)]})
+        latencies_ordered.append({'pc': pc, 'num_samples': N, 'median': larr[int((N-1) * 0.5)],
+            '90p': larr[int((N-1) * 0.9)], '99p': larr[int((N-1) * 0.99)],
+            '999p': larr[int((N-1) * 0.999)], 'max': larr[N-1]})
         pcs.append(pc)
 
     def dist_distance(e):
@@ -241,6 +242,7 @@ def generate_stats(executable):
         print('    90p: {:.4f}'.format(e['90p']))
         print('    99p: {:.4f}'.format(e['99p']))
         print('    99.9p: {:.4f}'.format(e['999p']))
+        print('    max: {:.4f}'.format(e['max']))
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
