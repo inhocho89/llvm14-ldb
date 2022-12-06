@@ -405,7 +405,6 @@ def parse_ldb(executable, mreq):
 
     my_events.sort(key=events_sort_tsc)
 
-    print(pcs)
     # parse pcs
     finfomap = get_finfos(dwarfinfo, mapsinfo, pcs)
 
