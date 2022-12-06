@@ -21,9 +21,6 @@ void *monitor_main(void *arg) {
   uint64_t **ldb_latency;
   int *ldb_cnt;
 
-  struct timespec last_ts;
-  struct timespec start_ts;
-
   // temporary variables
   uint32_t temp_tag[LDB_MAX_CALLDEPTH];
   uint64_t temp_ngen[LDB_MAX_CALLDEPTH];
@@ -31,7 +28,6 @@ void *monitor_main(void *arg) {
   char *temp_rbp[LDB_MAX_CALLDEPTH];
 
   struct timespec now;
-  uint64_t elapsed;
 
   // allocate memory for bookkeeping
   ldb_tag = (uint32_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint32_t *));
@@ -53,18 +49,10 @@ void *monitor_main(void *arg) {
 
   ldb_event_buffer_t *ebuf = ldb_shared->ldb_thread_infos[get_thread_info_idx()].ebuf;
 
-  clock_gettime(CLOCK_MONOTONIC, &start_ts);
-  last_ts = start_ts;
-
   printf("Monitor thread starts\n");
   
   // Currently busy-running
   while (running) {
-    barrier();
-    clock_gettime(CLOCK_MONOTONIC, &now);
-    barrier();
-    elapsed = (now.tv_sec - last_ts.tv_sec) * 1000000000 + (now.tv_nsec - last_ts.tv_nsec);
-
     for (int tidx = 0; tidx < ldb_shared->ldb_max_idx; ++tidx) {
       // Skip if fsbase is invalid
       if (ldb_shared->ldb_thread_infos[tidx].fsbase == NULL) {
@@ -74,6 +62,9 @@ void *monitor_main(void *arg) {
       pid_t thread_id = ldb_shared->ldb_thread_infos[tidx].id;
       char ***fsbase = &(ldb_shared->ldb_thread_infos[tidx].fsbase);
       char *stack_base = ldb_shared->ldb_thread_infos[tidx].stackbase;
+      struct timespec *last_ts = &ldb_shared->ldb_thread_infos[tidx].ts_scan;
+      struct timespec now;
+      uint64_t elapsed;
       int lidx = 0;
       char *rbp = *(*fsbase - 1);
       uint64_t slock2 = *(uint64_t *)(*fsbase - 2);
@@ -85,6 +76,11 @@ void *monitor_main(void *arg) {
       uint32_t tag;
       uint32_t canary;
       char *rip;
+
+      barrier();
+      clock_gettime(CLOCK_MONOTONIC, &now);
+      barrier();
+      elapsed = (now.tv_sec - last_ts->tv_sec) * 1000000000 + (now.tv_nsec - last_ts->tv_nsec);
 
       // Heuristic check if rbp is not valid, skip this iteration
       if (rbp <= (char *)0x7f0000000000 || rbp > stack_base) {
@@ -183,9 +179,8 @@ void *monitor_main(void *arg) {
       }
 
       ldb_cnt[tidx] = gidx;
+      *last_ts = now;
     } // for
-
-    last_ts = now;
 
 #if LDB_MONITOR_PERIOD > 0
     if (elapsed < LDB_MONITOR_PERIOD * 1000) {

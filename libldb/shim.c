@@ -60,7 +60,7 @@ static inline uint64_t timespec_diff_ns(struct timespec t1, struct timespec t2) 
 
 static void event_record_mutex(pthread_mutex_t *mutex) {
   if (unlikely(!ldb_shared)) {
-    ldb_shared = attach_shared_memory();
+    return;
   }
 
   struct timespec now;
@@ -121,6 +121,9 @@ void *__ldb_thread_start(void *arg) {
     fprintf(stderr, "\tmalloc() failed\n");
   }
 
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+
   // start tracking
   pthread_spin_lock(&(ldb_shared->ldb_tlock));
   tidx = get_tidx();
@@ -130,8 +133,9 @@ void *__ldb_thread_start(void *arg) {
   ldb_shared->ldb_thread_infos[tidx].ebuf = ebuf;
   pthread_spin_unlock(&(ldb_shared->ldb_tlock));
 
-  clock_gettime(CLOCK_MONOTONIC, &ldb_shared->ldb_thread_infos[tidx].ts_wait);
-  clock_gettime(CLOCK_MONOTONIC, &ldb_shared->ldb_thread_infos[tidx].ts_lock);
+  ldb_shared->ldb_thread_infos[tidx].ts_wait = now;
+  ldb_shared->ldb_thread_infos[tidx].ts_lock = now;
+  ldb_shared->ldb_thread_infos[tidx].ts_scan = now;
 
   register_thread_info(tidx);
 

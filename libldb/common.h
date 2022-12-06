@@ -65,6 +65,7 @@ typedef struct {
   char *stackbase;
   struct timespec ts_wait;
   struct timespec ts_lock;
+  struct timespec ts_scan;
   ldb_event_buffer_t *ebuf;
 } ldb_thread_info_t;
 
