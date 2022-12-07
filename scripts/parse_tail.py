@@ -149,7 +149,7 @@ def get_finfos(dwarfinfo, mapsinfo, addresses):
 
     return finfomap
 
-def get_req_id_pct(start_pct, end_pct):
+def get_req_id_pct(min_latency):
     start_us = {}
     active_tags = {}
     latencies = []
@@ -212,16 +212,13 @@ def get_req_id_pct(start_pct, end_pct):
 
     latencies.sort(key=filter_req_sort)
 
-    N = len(latencies)
-
-    start_idx = int((N-1) * start_pct)
-    end_idx = int((N-1) * end_pct)
-
     ret = []
     total_latency = 0.0
-    for i in range(start_idx, end_idx):
-        ret.append(latencies[i]['nreq'])
-        total_latency += latencies[i]['latency']
+
+    for l in latencies:
+        if l['latency'] >= min_latency:
+            ret.append(l['nreq'])
+            total_latency += l['latency']
 
     return ret, total_latency / len(ret)
 
@@ -268,8 +265,6 @@ def get_events_from_ldb(request_ids):
                 if tag not in request_ids:
                     continue
 
-                request_ids.remove(tag)
-
                 if tid in thread_pending:
                     thread_pending.pop(tid)
 
@@ -308,19 +303,15 @@ def get_events_from_ldb(request_ids):
 
     return events
 
-def generate_stat(executable, start_pct, end_pct):
+def generate_stat(executable, min_latency):
     dwarfinfo = parse_elf(executable)
     mapsinfo = parse_maps()
 
-    print('computing request processing times....')
-    req_ids,avg_latency = get_req_id_pct(start_pct, end_pct)
-    N = len(req_ids)
-    print('fetched request IDs: {:d}'.format(N))
-    print('collecting events...')
+    req_ids,avg_latency = get_req_id_pct(min_latency)
     events = get_events_from_ldb(req_ids)
-    print('fetched {:d} events'.format(len(events)))
 
-    print('Generating statistics...')
+    print(avg_latency)
+
     latencies = {}
 
     for e in events:
@@ -343,34 +334,26 @@ def generate_stat(executable, start_pct, end_pct):
         pcs.append(pc)
 
     def dist_distance(e):
-        return e['max']
+        return e['sum']
 
     latencies_ordered.sort(key=dist_distance, reverse=True)
-    print('Parsing pcs...')
     finfomap = get_finfos(dwarfinfo, mapsinfo, pcs)
 
-    with open("pct", "w") as fout:
-        fout.write('{:f}\n'.format(avg_latency))
-        for e in latencies_ordered:
-            fout.write('{} (pc={})\n'.format(finfomap[e['pc']], hex(e['pc'])))
-            fout.write('    num_samples: {:d}\n'.format(e['num_samples']))
-            fout.write('    sum: {:.4f}\n'.format(e['sum']))
-            fout.write('    avg: {:.4f} ({:.4f})\n'.format(e['sum']/N, e['sum']/N/avg_latency))
-            fout.write('    median: {:.4f}\n'.format(e['median']))
-            fout.write('    90p: {:.4f}\n'.format(e['90p']))
-            fout.write('    99p: {:.4f}\n'.format(e['99p']))
-            fout.write('    99.9p: {:.4f}\n'.format(e['999p']))
-            fout.write('    max: {:.4f}\n'.format(e['max']))
+    N = len(req_ids)
 
-    print('output is written to: pct')
+    for e in latencies_ordered:
+        print('{} (pc={})'.format(finfomap[e['pc']], hex(e['pc'])))
+        print('    num_samples: {:d}'.format(e['num_samples']))
+        print('    sum: {:.4f}'.format(e['sum']))
+        print('    avg: {:.4f} ({:.4f})'.format(e['sum']/N, e['sum']/N/avg_latency))
+        print('    median: {:.4f}'.format(e['median']))
+        print('    90p: {:.4f}'.format(e['90p']))
+        print('    99p: {:.4f}'.format(e['99p']))
+        print('    99.9p: {:.4f}'.format(e['999p']))
+        print('    max: {:.4f}'.format(e['max']))
 
 if __name__ == '__main__':
-    if len(sys.argv) != 4:
-        print('Expected usage: {0} <executable> <start_pct> <end_pct>'.format(sys.argv[0]))
+    if len(sys.argv) != 3:
+        print('Expected usage: {0} <executable> <min latency>'.format(sys.argv[0]))
         sys.exit(1)
-    start_pct = float(sys.argv[2])
-    end_pct = float(sys.argv[3])
-    if start_pct < 0.0 or start_pct > 1.0 or end_pct < 0.0 or end_pct > 1.0:
-        print('start_pct and end_pct should be between 0.0 and 1.0')
-        sys.exit(1)
-    generate_stat(sys.argv[1], start_pct, end_pct)
+    generate_stat(sys.argv[1], float(sys.argv[2]))

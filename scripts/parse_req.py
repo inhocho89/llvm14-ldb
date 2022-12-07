@@ -207,6 +207,7 @@ def parse_ldb(executable, mreq):
     my_events = []      # list of related event entries
     thread_list = []    # list of thread related to mreq
     thread_watch = []   # list of thread to watch
+    thread_pending = {}
     pcs = []
     nthread = 0
     min_tsc = 0
@@ -243,7 +244,11 @@ def parse_ldb(executable, mreq):
                 event_str = ""
                 detail_str = ""
 
-                if tid not in thread_watch:
+                if tid not in thread_watch and tid not in thread_pending:
+                    continue
+
+                if tid in thread_pending and timestamp_us - latency_us > thread_pending[tid]:
+                    thread_pending.pop(tid)
                     continue
 
                 # my event
@@ -256,7 +261,7 @@ def parse_ldb(executable, mreq):
                 if tid not in thread_list:
                     thread_list.append(tid)
 
-                detail_str = "ngen={:d}, latency={:f} us".format(ngen, latency_us)
+                detail_str = "ngen={:d}, latency={:.3f} us".format(ngen, latency_us)
 
                 pc -= 5
 
@@ -308,6 +313,7 @@ def parse_ldb(executable, mreq):
                     continue
                 
                 thread_watch.remove(tid)
+                thread_pending[tid] = timestamp_us
                 my_events.append({'tsc': timestamp_us,
                     'thread_idx': tid,
                     'pc': 0,
@@ -319,6 +325,7 @@ def parse_ldb(executable, mreq):
                     continue
 
                 thread_watch.remove(tid)
+                thread_pending[tid] = timestamp_us
                 my_events.append({'tsc': timestamp_us,
                     'thread_idx': tid,
                     'pc': 0,
@@ -345,7 +352,7 @@ def parse_ldb(executable, mreq):
                         'thread_idx': tid,
                         'pc': 0,
                         'event': "MUTEX_LOCK",
-                        'detail': "mutex={}, wait_time={:f} us"\
+                        'detail': "mutex={}, wait_time={:.3f} us"\
                                 .format(hex(mutex), wait_time)})
                     my_mwait_events.append({'wait_tsc': last_mutex_ts[tid],
                         'lock_tsc': timestamp_us,
@@ -392,7 +399,7 @@ def parse_ldb(executable, mreq):
                         'thread_idx': e['tid'],
                         'pc': pc,
                         'event': "**MHOLDER_STACK_SAMPLE",
-                        'detail': "mutex={}, ngen={:d}, latency={:f} us"\
+                        'detail': "mutex={}, ngen={:d}, latency={:.3f} us"\
                                 .format(hex(mwe['mutex']), ngen, latency_us)})
                     if pc not in pcs:
                         pcs.append(pc)
@@ -488,22 +495,22 @@ def generate_stats(executable, mreq):
         le = filter_req[ldb_i]
         pe = row_in_time[perf_i]
         if le['tsc'] < pe['tsc']:
-            print("{:f} (+{:f}) [{:d}] {} {}"
+            print("{:.3f} (+{:.3f}) [{:d}] {} {}"
                     .format(le['tsc'], le['tsc'] - min_tsc, le['thread_idx'],
                         le['event'], le['detail']))
             ldb_i += 1
         else:
-            print("{:f} (+{:f}) [{:d}] {} {}"
+            print("{:.3f} (+{:.3f}) [{:d}] {} {}"
                 .format(pe['tsc'], pe['tsc'] - min_tsc, pe['thread_idx'],
                     pe['event'], pe['detail']))
             perf_i += 1
 
     for e in filter_req[ldb_i:]:
-        print("{:f} (+{:f}) [{:d}] {} {}"
+        print("{:.3f} (+{:.3f}) [{:d}] {} {}"
                 .format(e['tsc'], e['tsc'] - min_tsc, e['thread_idx'], e['event'], e['detail']))
 
     for e in row_in_time[perf_i:]:
-        print("{:f} (+{:f}) [{:d}] {} {}"
+        print("{:.3f} (+{:.3f}) [{:d}] {} {}"
               .format(e['tsc'], e['tsc'] - min_tsc, e['thread_idx'], e['event'], e['detail']))
 
 if __name__ == '__main__':
