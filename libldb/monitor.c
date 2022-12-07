@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <time.h>
 #include "common.h"
 
@@ -28,6 +29,12 @@ void *monitor_main(void *arg) {
   char *temp_rbp[LDB_MAX_CALLDEPTH];
 
   struct timespec now;
+
+  cpu_set_t cpuset;
+
+  CPU_ZERO(&cpuset);
+  CPU_SET(0, &cpuset);
+  pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
 
   // allocate memory for bookkeeping
   ldb_tag = (uint32_t **)malloc(LDB_MAX_NTHREAD * sizeof(uint32_t *));

@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "common.h"
 #include "ldb/logger.h"
 
@@ -15,6 +16,12 @@ void *logger_main(void *arg) {
   int len;
 
   printf("logger thread starts\n");
+
+  cpu_set_t cpuset;
+
+  CPU_ZERO(&cpuset);
+  CPU_SET(1, &cpuset);
+  pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
 
   // store maps
   pid_t pid_self = syscall(SYS_getpid);
