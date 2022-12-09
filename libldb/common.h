@@ -98,6 +98,15 @@ inline __attribute__((always_inline)) void __time_delay_us(uint64_t us)
     cpu_relax();
 }
 
+inline __attribute__((always_inline)) void __time_delay_ns(uint64_t ns)
+{
+  uint64_t cycles = ns * CYCLES_PER_US / 1000;
+  unsigned long start = rdtsc();
+
+  while (rdtsc() - start < cycles)
+    cpu_relax();
+}
+
 inline __attribute__((always_inline)) char *get_fs_rbp() {
   char *rbp;
 

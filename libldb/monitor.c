@@ -28,7 +28,9 @@ void *monitor_main(void *arg) {
   char *temp_rip[LDB_MAX_CALLDEPTH];
   char *temp_rbp[LDB_MAX_CALLDEPTH];
 
-  struct timespec now;
+  struct timespec scan_start;
+  struct timespec scan_finish;
+  uint64_t scan_delay;
 
   cpu_set_t cpuset;
 
@@ -60,6 +62,11 @@ void *monitor_main(void *arg) {
   
   // Currently busy-running
   while (running) {
+#if LDB_MONITOR_PERIOD > 0
+    barrier();
+    clock_gettime(CLOCK_MONOTONIC, &scan_start);
+    barrier();
+#endif
     for (int tidx = 0; tidx < ldb_shared->ldb_max_idx; ++tidx) {
       // Skip if fsbase is invalid
       if (ldb_shared->ldb_thread_infos[tidx].fsbase == NULL) {
@@ -188,10 +195,15 @@ void *monitor_main(void *arg) {
       ldb_cnt[tidx] = gidx;
       *last_ts = now;
     } // for
-
 #if LDB_MONITOR_PERIOD > 0
-    if (elapsed < LDB_MONITOR_PERIOD * 1000) {
-      __time_delay_us(LDB_MONITOR_PERIOD - elapsed / 1000);
+    barrier();
+    clock_gettime(CLOCK_MONOTONIC, &scan_finish);
+    barrier();
+    scan_delay = (scan_finish.tv_sec - scan_start.tv_sec) * 1000000;
+    scan_delay += (scan_finish.tv_nsec - scan_start.tv_nsec);
+
+    if (scan_delay < LDB_MONITOR_PERIOD * 1000) {
+      __time_delay_ns(LDB_MONITOR_PERIOD * 1000 - scan_delay);
     }
 #endif
   } // while true
