@@ -314,8 +314,8 @@ def generate_stat(executable, start_pct, end_pct):
 
     print('computing request processing times....')
     req_ids,avg_latency = get_req_id_pct(start_pct, end_pct)
-    N = len(req_ids)
-    print('fetched request IDs: {:d}'.format(N))
+    nreq = len(req_ids)
+    print('fetched request IDs: {:d}'.format(nreq))
     print('collecting events...')
     events = get_events_from_ldb(req_ids)
     print('fetched {:d} events'.format(len(events)))
@@ -343,7 +343,7 @@ def generate_stat(executable, start_pct, end_pct):
         pcs.append(pc)
 
     def dist_distance(e):
-        return e['max']
+        return e['sum']
 
     latencies_ordered.sort(key=dist_distance, reverse=True)
     print('Parsing pcs...')
@@ -355,7 +355,8 @@ def generate_stat(executable, start_pct, end_pct):
             fout.write('{} (pc={})\n'.format(finfomap[e['pc']], hex(e['pc'])))
             fout.write('    num_samples: {:d}\n'.format(e['num_samples']))
             fout.write('    sum: {:.4f}\n'.format(e['sum']))
-            fout.write('    avg: {:.4f} ({:.4f})\n'.format(e['sum']/N, e['sum']/N/avg_latency))
+            fout.write('    avg: {:.4f} ({:.4f})\n'.format(e['sum']/nreq, e['sum']/nreq/avg_latency))
+            fout.write('    avg: {:.4f}\n'.format(e['sum']/e['num_samples']))
             fout.write('    median: {:.4f}\n'.format(e['median']))
             fout.write('    90p: {:.4f}\n'.format(e['90p']))
             fout.write('    99p: {:.4f}\n'.format(e['99p']))

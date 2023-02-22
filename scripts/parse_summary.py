@@ -223,13 +223,15 @@ def generate_stats(executable):
         N = len(larr)
         if larr[N-1] == 0.0:
             continue
-        latencies_ordered.append({'pc': pc, 'num_samples': N, 'median': larr[int((N-1) * 0.5)],
-            '90p': larr[int((N-1) * 0.9)], '99p': larr[int((N-1) * 0.99)],
-            '999p': larr[int((N-1) * 0.999)], 'max': larr[N-1]})
+        latencies_ordered.append({'pc': pc, 'num_samples': N, 'min': larr[0],
+            'median': larr[int((N-1) * 0.5)], '90p': larr[int((N-1) * 0.9)],
+            '99p': larr[int((N-1) * 0.99)], '999p': larr[int((N-1) * 0.999)],
+            'max': larr[N-1]})
         pcs.append(pc)
 
     def dist_distance(e):
-        return e['999p'] - e['median']
+        return e['999p']
+#        return e['999p'] - e['median']
 
     latencies_ordered.sort(key=dist_distance, reverse=True)
 
@@ -238,6 +240,7 @@ def generate_stats(executable):
     for e in latencies_ordered:
         print('{} (pc={})'.format(finfomap[e['pc']], hex(e['pc'])))
         print('    num_samples: {:d}'.format(e['num_samples']))
+        print('    min: {:.4f}'.format(e['min']))
         print('    median: {:.4f}'.format(e['median']))
         print('    90p: {:.4f}'.format(e['90p']))
         print('    99p: {:.4f}'.format(e['99p']))
