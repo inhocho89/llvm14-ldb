@@ -197,6 +197,9 @@ def extract_func_desc(line):
     return line[:i+1]
 
 def func_read(file_path, nline, ncol):
+    if not os.path.exists(file_path):
+        return "???"
+
     with open(file_path, "r") as f:
         for i, line in enumerate(f):
             if i == nline - 1:
@@ -423,7 +426,40 @@ def parse_ldb(executable, mreq):
     all_events.sort(key=events_sort_tsc)
     my_mwait_events.sort(key=events_sort_mwait)
 
+    # extract mholder's stack sample
+    mutex_holder = {}
+    mh_events = []
+    mh_threads = []
+    for e in all_events:
+        if e['event_type'] == EVENT_STACK_SAMPLE:
+            for mwe in my_mwait_events:
+                if mwe['wait_tsc'] < e['tsc'] < mwe['lock_tsc'] and \
+                        mwe['mutex'] in mutex_holder and \
+                        mutex_holder[mwe['mutex']] == e['tid']:
+                    latency_us = e['arg1'] / 1000.0
+                    pc = e['arg2'] - 5
+                    ngen = e['arg3']
+                    mh_events.append({'tsc': e['tsc'],
+                        'thread_idx': e['tid'],
+                        'pc': pc,
+                        'ngen': ngen,
+                        'latency_us': latency_us,
+                        'event': "MHOLDER_STACK_SAMPLE",
+                        'detail': "mutex={}, ngen={:d}, latency={:.3f} us"\
+                                .format(hex(mwe['mutex']), ngen, latency_us)})
+                    if e['tid'] not in mh_threads:
+                        mh_threads.append(e['tid'])
+                    if pc not in pcs:
+                        pcs.append(pc)
+        elif e['event_type'] == EVENT_MUTEX_LOCK:
+            mutex = e['arg1']
+            mutex_holder[mutex] = e['tid']
+        elif e['event_type'] == EVENT_MUTEX_UNLOCK:
+            mutex = e['arg1']
+            mutex_holder[mutex] = 0
+
     my_events.sort(key=events_sort_tsc)
+    mh_events.sort(key=events_sort_tsc)
 
     # parse pcs
     finfomap = get_finfos(dwarfinfo, mapsinfo, pcs)
@@ -435,7 +471,13 @@ def parse_ldb(executable, mreq):
         e['detail'] += ", pc={}({})".format(hex(e['pc']), finfomap[e['pc']])
         e['fline'] = finfomap[e['pc']]
 
-    return my_events, thread_list, min_tsc, max_tsc
+    for e in mh_events:
+        if e['pc'] == 0:
+            continue
+        e['detail'] += ", pc={}({})".format(hex(e['pc']), finfomap[e['pc']])
+        e['fline'] = finfomap[e['pc']]
+
+    return my_events, thread_list, mh_events, mh_threads, min_tsc, max_tsc
 
 def parse_perf(thread_list, min_tsc, max_tsc):
 #    print('Perf Data: {}'.format(PERF_DATA_FILENAME))
@@ -496,7 +538,7 @@ def parse_perf(thread_list, min_tsc, max_tsc):
     return row_in_time
 
 SVG_WIDTH = 1200
-SVG_HEIGHT = 500
+SVG_HEIGHT = 600
 XMARKS = 8
 BAR_COLORS = ['rgb(216, 10, 44)',
         'rgb(241,38,27)',
@@ -513,7 +555,8 @@ def addBar(dwg, x, y, width, height, text, fill):
     g = dwg.g()
     
     # rect
-    g.add(dwg.rect((x,y),(width,height), rx=2, ry=2, fill=fill))
+    r = dwg.rect((x,y),(width,height), rx=2, ry=2, fill=fill)
+    g.add(r)
 
     # text
     if len(text) * 7 > width - 3:
@@ -531,21 +574,111 @@ def addBar(dwg, x, y, width, height, text, fill):
 
     dwg.add(g)
 
-def generate_stats(executable, mreq):
-    filter_req, thread_list, min_tsc, max_tsc = parse_ldb(executable, mreq)
-    row_in_time = parse_perf(thread_list, min_tsc, max_tsc)
+    return r
 
-    thread_id = thread_list[0]
+def addGraph(dwg, offset, events, duration, thread_id, isMutexHolder = False):
+    graph_height = SVG_HEIGHT - offset
+
+    # draw x axis
+    dwg.add(dwg.line(start=(50,graph_height-50),
+        end=(SVG_WIDTH-20,graph_height-50),
+        stroke="#000",
+        fill="none",
+        stroke_width=2))
+
+    spacing = (SVG_WIDTH-70) / (XMARKS-1)
+    spacingx = duration / (XMARKS-1)
+
+    dwg.add(dwg.line(start=(50,graph_height-50-5),
+        end=(50,SVG_HEIGHT-offset-50+5),
+        stroke="#000",
+        fill="none",
+        stroke_width=2))
+    dwg.add(dwg.text("{:.0f} us".format(0.0),
+        insert=(50 - 10,graph_height-50+20),
+        font_size="12px",
+        font_family="Courier New"))
+
+    for i in range(1, XMARKS):
+            dwg.add(dwg.line(start=(50 + spacing * i,graph_height-50-5),
+                end=(50 + spacing * i,graph_height-50+5),
+                stroke="#000",
+                fill="none",
+                stroke_width=2))
+            dwg.add(dwg.text("{:.0f} us".format(i * spacingx),
+                insert=(50 + spacing * i - 20,graph_height-50+20),
+                font_size="12px",
+                font_family="Courier New"))
+
+    # draw function bars
+    max_level = 0
+    for i in range(len(events)):
+        le = events[i]
+        start = le['tsc'] - le['latency_us']
+        level = 0
+
+        for j in range(i):
+            le_ = events[j]
+            start_ = le_['tsc'] - le_['latency_us']
+            if le_['tsc'] > start and start_ < le['tsc']:
+                level += 1
+
+        if level > max_level:
+            max_level = level
+        
+        r = addBar(dwg,
+                50 + (SVG_WIDTH-70) * start / duration, # x
+                graph_height - 50 - (level + 1) * 16, # y
+                (SVG_WIDTH-70) * le['latency_us'] / duration, # width
+                15, # height
+                le['fline'],
+                BAR_COLORS[level % len(BAR_COLORS)])
+
+        if isMutexHolder:
+            r.fill(BAR_COLORS[level % len(BAR_COLORS)], opacity=0.5)
+
+    # draw y axis
+    yaxis_x = 30
+    yaxis_y = graph_height - 50 - (max_level+1) * 8 + 40
+    if not isMutexHolder:
+        pcRotate = 'rotate(270,{:d},{:d})'.format(yaxis_x,yaxis_y)
+        dwg.add(dwg.text("tid:" + str(thread_id),
+            insert=(yaxis_x, yaxis_y),
+            font_size="12px",
+            font_family="Courier New",
+            font_weight="bold",
+            transform=pcRotate))
+    else:
+        pcRotate = 'rotate(270,{:d},{:d})'.format(yaxis_x-8,yaxis_y)
+        dwg.add(dwg.text("tid:" + str(thread_id),
+            insert=(yaxis_x-8, yaxis_y),
+            font_size="12px",
+            font_family="courier new",
+            font_weight="bold",
+            transform=pcRotate))
+        pcRotate = 'rotate(270,{:d},{:d})'.format(yaxis_x+4,yaxis_y+5)
+        dwg.add(dwg.text("(mutex holder)",
+            insert=(yaxis_x+4, yaxis_y+5),
+            fill="rgb(216,10,44)",
+            font_size="10px",
+            font_family="courier new",
+            transform=pcRotate))
+
+    return 50 + (max_level + 1) * 16 + 30
+
+def generate_stats(executable, mreq):
+    my_events, my_threads, mh_events, mh_threads, min_tsc, max_tsc = parse_ldb(executable, mreq)
+    row_in_time = parse_perf(my_threads, min_tsc, max_tsc)
     duration = max_tsc - min_tsc
 
-    func_events = list(filter(lambda e: e['event'] == 'STACK_SAMPLE', filter_req))
-    func_events = list(filter(lambda e: e['latency_us'] > 0.0, func_events))
-    func_events = list(filter(lambda e: e['thread_idx'] == thread_id, func_events))
+    for e in my_events:
+        e['tsc'] -= min_tsc
+
+    for e in mh_events:
+        e['tsc'] -= min_tsc
 
     def events_sort_ngen(e):
         return e['ngen']
-
-    func_events.sort(key=events_sort_ngen)
 
     ## Draw SVG
     dwg = svgwrite.Drawing("req" + str(mreq) + ".svg", size=(SVG_WIDTH,SVG_HEIGHT))
@@ -565,72 +698,28 @@ def generate_stats(executable, mreq):
         font_family="Courier New",
         font_weight="bold"))
 
-    # draw x axis
-    dwg.add(dwg.line(start=(50,SVG_HEIGHT-50),end=(SVG_WIDTH-20,SVG_HEIGHT-50),
-        stroke="#000",fill="none",stroke_width=2))
+    offset = 0
+    for thread_id in my_threads:
+        events = list(filter(lambda e: e['event'] == 'STACK_SAMPLE', my_events))
+        events = list(filter(lambda e: e['latency_us'] > 0.0, events))
+        events = list(filter(lambda e: e['thread_idx'] == thread_id, events))
 
-    spacing = (SVG_WIDTH-70) / (XMARKS-1)
-    spacingx = duration / (XMARKS-1)
+        events.sort(key=events_sort_ngen)
+        offset += addGraph(dwg, offset, events, duration, thread_id) 
 
-    dwg.add(dwg.line(start=(50,SVG_HEIGHT-50-5),end=(50,SVG_HEIGHT-50+5),
-        stroke="#000",fill="none",stroke_width=2))
-    dwg.add(dwg.text("{:.0f} us".format(0.0),
-        insert=(50 - 10,SVG_HEIGHT-50+20),font_size="12px",font_family="Courier New"))
+    for thread_id in mh_threads:
+        events = list(filter(lambda e: e['event'] == 'MHOLDER_STACK_SAMPLE', mh_events))
+        events = list(filter(lambda e: e['latency_us'] > 0.0, events))
+        events = list(filter(lambda e: e['thread_idx'] == thread_id, events))
 
-    for i in range(1, XMARKS):
-            dwg.add(dwg.line(start=(50 + spacing * i,SVG_HEIGHT-50-5),
-                end=(50 + spacing * i,SVG_HEIGHT-50+5),
-                stroke="#000",fill="none",stroke_width=2))
-            dwg.add(dwg.text("{:.0f} us".format(i * spacingx),
-                insert=(50 + spacing * i - 20,SVG_HEIGHT-50+20),
-                font_size="12px",font_family="Courier New"))
+        # heuristics to avoid noise
+        if len(events) <= 1:
+            continue
 
-    # draw function bars
-    max_level = 0
-    for i in range(len(func_events)):
-        le = func_events[i]
-        end = le['tsc'] - min_tsc
-        start = end - le['latency_us']
-        level = 0
-
-        for j in range(i):
-            le_ = func_events[j]
-            end_ = le_['tsc'] - min_tsc
-            start_ = end_ - le_['latency_us']
-            if end_ > start and start_ < end:
-                level += 1
-
-        if level > max_level:
-            max_level = level
-        
-        addBar(dwg,
-                50 + (SVG_WIDTH-70) * start / duration, # x
-                434 - level * 16, # y
-                (SVG_WIDTH-70) * le['latency_us'] / duration, # width
-                15, # height
-                le['fline'],
-                BAR_COLORS[level % len(BAR_COLORS)])
-
-    # draw y axis
-    yaxis_x = 30
-    yaxis_y = SVG_HEIGHT - 50 - (max_level+1) * 8 + 35
-    pcRotate = 'rotate(270,{:d},{:d})'.format(yaxis_x,yaxis_y)
-    dwg.add(dwg.text("tid:" + str(thread_id),
-        insert=(yaxis_x, yaxis_y),
-        font_size="12px",
-        font_family="Courier New",
-        font_weight="bold",
-        transform=pcRotate))
+        events.sort(key=events_sort_ngen)
+        offset += addGraph(dwg, offset, events, duration, thread_id, True)
 
     dwg.save()
-
-#    i = 0
-#    while i < len(func_events):
-#        le = func_events[i]
-#        print("{:.3f} (+{:.3f}) [{:d}] {} {}"
-#                .format(le['tsc'], le['tsc'] - min_tsc, le['thread_idx'],
-#                    le['event'], le['detail']))
-#        i += 1
 
 if __name__ == '__main__':
     if len(sys.argv) != 3:
