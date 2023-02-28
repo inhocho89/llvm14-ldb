@@ -23,7 +23,7 @@
   * ``llvm14-ldb/apps/demo> make``
 
 2. (optional) run perf to get Linux scheduling data (in a separate terminal)
-  * ``llvm14-ldb/apps/demo> sudo perf sched record -k CLOCK_MONOTONIC``
+  * ``llvm14-ldb/apps/demo> sudo perf sched record -k CLOCK_MONOTONIC_RAW``
 
 3. Run application with preloading LDB shim layer.
   * ``llvm14-ldb/apps/demo> LD_PRELOAD=/path/to/llvm14-ldb/libldb/ldb_shim.so ./demo``

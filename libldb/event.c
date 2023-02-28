@@ -37,7 +37,7 @@ inline void event_record_now(int event_type, uint64_t arg1, uint64_t arg2, uint6
   int tinfo_idx = get_thread_info_idx();
   ldb_thread_info_t *tinfo = &ldb_shared->ldb_thread_infos[tinfo_idx];
 
-  clock_gettime(CLOCK_MONOTONIC, &now);
+  clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 
   event_record(tinfo->ebuf, event_type, now, tinfo->id, arg1, arg2, arg3);
 }

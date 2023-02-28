@@ -36,7 +36,7 @@ void __ldbInit(void) {
   ebuf->events = (ldb_event_entry *)malloc(sizeof(ldb_event_entry) * LDB_EVENT_BUF_SIZE);
 
   struct timespec now;
-  clock_gettime(CLOCK_MONOTONIC, &now);
+  clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 
   // initialize main thread's info
   ldb_shared->ldb_thread_infos[0].id = syscall(SYS_gettid);

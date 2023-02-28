@@ -64,7 +64,7 @@ void *monitor_main(void *arg) {
   while (running) {
 #if LDB_MONITOR_PERIOD > 0
     barrier();
-    clock_gettime(CLOCK_MONOTONIC, &scan_start);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &scan_start);
     barrier();
 #endif
     for (int tidx = 0; tidx < ldb_shared->ldb_max_idx; ++tidx) {
@@ -92,7 +92,7 @@ void *monitor_main(void *arg) {
       char *rip;
 
       barrier();
-      clock_gettime(CLOCK_MONOTONIC, &now);
+      clock_gettime(CLOCK_MONOTONIC_RAW, &now);
       barrier();
       elapsed = (now.tv_sec - last_ts->tv_sec) * 1000000000 + (now.tv_nsec - last_ts->tv_nsec);
 
@@ -197,7 +197,7 @@ void *monitor_main(void *arg) {
     } // for
 #if LDB_MONITOR_PERIOD > 0
     barrier();
-    clock_gettime(CLOCK_MONOTONIC, &scan_finish);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &scan_finish);
     barrier();
     scan_delay = (scan_finish.tv_sec - scan_start.tv_sec) * 1000000;
     scan_delay += (scan_finish.tv_nsec - scan_start.tv_nsec);

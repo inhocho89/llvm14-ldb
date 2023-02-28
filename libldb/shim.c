@@ -67,7 +67,7 @@ static void event_record_mutex(pthread_mutex_t *mutex) {
   int tinfo_idx = get_thread_info_idx();
   ldb_thread_info_t *tinfo = &ldb_shared->ldb_thread_infos[tinfo_idx];
 
-  clock_gettime(CLOCK_MONOTONIC, &now);
+  clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 
   uint64_t wait_time = timespec_diff_ns(tinfo->ts_lock, tinfo->ts_wait);
   uint64_t lock_time = timespec_diff_ns(now, tinfo->ts_lock);
@@ -122,7 +122,7 @@ void *__ldb_thread_start(void *arg) {
   }
 
   struct timespec now;
-  clock_gettime(CLOCK_MONOTONIC, &now);
+  clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 
   // start tracking
   pthread_spin_lock(&(ldb_shared->ldb_tlock));
@@ -218,13 +218,13 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
     }
   }
   if (likely(ldb_shared)) {
-    clock_gettime(CLOCK_MONOTONIC, &ldb_shared->ldb_thread_infos[thread_info_idx].ts_wait);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ldb_shared->ldb_thread_infos[thread_info_idx].ts_wait);
   }
 
   ret = real_pthread_mutex_lock(mutex);
 
   if (likely(ldb_shared && ret == 0)) {
-    clock_gettime(CLOCK_MONOTONIC, &ldb_shared->ldb_thread_infos[thread_info_idx].ts_lock);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ldb_shared->ldb_thread_infos[thread_info_idx].ts_lock);
   }
 
   return ret;
@@ -267,13 +267,13 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex) {
   }
 
   if (likely(ldb_shared)) {
-    clock_gettime(CLOCK_MONOTONIC, &ldb_shared->ldb_thread_infos[thread_info_idx].ts_wait);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ldb_shared->ldb_thread_infos[thread_info_idx].ts_wait);
   }
 
   ret = real_pthread_mutex_trylock(mutex);
 
   if (likely(ldb_shared) && ret == 0) {
-    clock_gettime(CLOCK_MONOTONIC, &ldb_shared->ldb_thread_infos[thread_info_idx].ts_lock);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ldb_shared->ldb_thread_infos[thread_info_idx].ts_lock);
   }
 
   return ret;
