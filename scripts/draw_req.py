@@ -560,7 +560,7 @@ def addBar(dwg, x, y, width, height, text, fill):
 
     # text
     if len(text) * 7 > width - 3:
-        tlen = (width - 3) // 7
+        tlen = int((width - 3) / 7)
         if tlen > 2:
             text = text[0:tlen-2] + ".."
         else:
