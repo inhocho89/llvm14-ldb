@@ -780,6 +780,9 @@ def generate_stats(executable, mreq):
             wlt = wait_lock_time[thread_id]
         offset += addGraph(dwg, offset, events, wlt, duration, thread_id) 
 
+        if thread_id in mh_threads:
+            mh_threads.remove(thread_id)
+
     for thread_id in mh_threads:
         events = list(filter(lambda e: e['event'] == 'MHOLDER_STACK_SAMPLE', mh_events))
         events = list(filter(lambda e: e['latency_us'] > 0.0, events))
