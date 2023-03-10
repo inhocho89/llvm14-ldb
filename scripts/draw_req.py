@@ -23,6 +23,8 @@ from elftools.common.py3compat import bytes2str
 from elftools.dwarf.descriptions import describe_form_class
 from elftools.elf.elffile import ELFFile
 
+EXTRA_WATCH = 100
+
 LDB_DATA_FILENAME = "ldb.data"
 MAPS_DATA_FILENAME = "maps.data"
 PERF_DATA_FILENAME = "perf.data"
@@ -256,6 +258,7 @@ def parse_ldb(executable, mreq):
 
     all_events = []     # all the events happend while tag is set
     my_mwait_events = []
+    wait_lock_time = {}
 
     # collect latency informations
     with open(LDB_DATA_FILENAME, 'rb') as ldb_bin:
@@ -287,16 +290,20 @@ def parse_ldb(executable, mreq):
                 if tid not in thread_watch and tid not in thread_pending:
                     continue
 
-                if tid in thread_pending and timestamp_us - latency_us > thread_pending[tid]:
-                    thread_pending.pop(tid)
-                    continue
+                if tid in thread_pending:
+                    if timestamp_us >= thread_pending[tid] + EXTRA_WATCH:
+                        thread_pending.pop(tid)
+                        continue
+                    if timestamp_us - latency_us > max_tsc:
+                        continue
 
                 # my event
-                if min_tsc == 0 or min_tsc > timestamp_us:
-                    min_tsc = timestamp_us
+                if tid in thread_watch:
+                    if min_tsc == 0 or min_tsc > timestamp_us:
+                        min_tsc = timestamp_us
 
-                if max_tsc == 0 or max_tsc < timestamp_us:
-                    max_tsc = timestamp_us
+                    if max_tsc == 0 or max_tsc < timestamp_us:
+                        max_tsc = timestamp_us
 
                 if tid not in thread_list:
                     thread_list.append(tid)
@@ -383,6 +390,9 @@ def parse_ldb(executable, mreq):
                         'event': "MUTEX_WAIT",
                         'detail': "mutex={}".format(hex(mutex))})
                     last_mutex_ts[tid] = timestamp_us
+                    if tid not in wait_lock_time:
+                        wait_lock_time[tid] = []
+                    wait_lock_time[tid].append([timestamp_us, -1, -1])
 
             elif event_type == EVENT_MUTEX_LOCK:
                 mutex = arg1
@@ -402,6 +412,9 @@ def parse_ldb(executable, mreq):
                         'mutex': mutex})
                     last_mutex_ts[tid] = timestamp_us
 
+                    if tid in wait_lock_time:
+                        wait_lock_time[tid][-1][1] = timestamp_us
+
             elif event_type == EVENT_MUTEX_UNLOCK:
                 mutex = arg1
                 if tid in thread_watch:
@@ -417,6 +430,9 @@ def parse_ldb(executable, mreq):
                     if tid in last_mutex_ts:
                         last_mutex_ts.pop(tid)
 
+                    if tid in wait_lock_time:
+                        wait_lock_time[tid][-1][2] = timestamp_us
+
     def events_sort_tsc(e):
         return e['tsc']
 
@@ -430,23 +446,26 @@ def parse_ldb(executable, mreq):
     mutex_holder = {}
     mh_events = []
     mh_threads = []
+    thread_watch = {}
     for e in all_events:
         if e['event_type'] == EVENT_STACK_SAMPLE:
             for mwe in my_mwait_events:
-                if mwe['wait_tsc'] < e['tsc'] < mwe['lock_tsc'] and \
-                        mwe['mutex'] in mutex_holder and \
-                        mutex_holder[mwe['mutex']] == e['tid']:
-                    latency_us = e['arg1'] / 1000.0
-                    pc = e['arg2'] - 5
-                    ngen = e['arg3']
-                    mh_events.append({'tsc': e['tsc'],
-                        'thread_idx': e['tid'],
-                        'pc': pc,
-                        'ngen': ngen,
-                        'latency_us': latency_us,
-                        'event': "MHOLDER_STACK_SAMPLE",
-                        'detail': "mutex={}, ngen={:d}, latency={:.3f} us"\
-                                .format(hex(mwe['mutex']), ngen, latency_us)})
+                latency_us = e['arg1'] / 1000.0
+                pc = e['arg2'] - 5
+                ngen = e['arg3']
+                if e['tid'] in thread_watch and e['tsc'] > thread_watch[e['tid']]:
+                    thread_watch.pop(e['tid'])
+                if mwe['wait_tsc'] < e['tsc'] - latency_us < mwe['lock_tsc']:
+                    if (mwe['mutex'] in mutex_holder and mutex_holder[mwe['mutex']] == e['tid']) or\
+                            e['tid'] in thread_watch:
+                        mh_events.append({'tsc': e['tsc'],
+                                          'thread_idx': e['tid'],
+                                          'pc': pc,
+                                          'ngen': ngen,
+                                          'latency_us': latency_us,
+                                          'event': "MHOLDER_STACK_SAMPLE",
+                                          'detail': "mutex={}, ngen={:d}, latency={:.3f} us"\
+                                                  .format(hex(mwe['mutex']), ngen, latency_us)})
                     if e['tid'] not in mh_threads:
                         mh_threads.append(e['tid'])
                     if pc not in pcs:
@@ -454,9 +473,16 @@ def parse_ldb(executable, mreq):
         elif e['event_type'] == EVENT_MUTEX_LOCK:
             mutex = e['arg1']
             mutex_holder[mutex] = e['tid']
+            if e['tid'] not in wait_lock_time:
+                wait_lock_time[e['tid']] = []
+            wait_lock_time[e['tid']].append([-1, e['tsc'], -1])
         elif e['event_type'] == EVENT_MUTEX_UNLOCK:
+            # give extra time to current mutex holder
+            thread_watch[mutex_holder[mutex]] = e['tsc'] + EXTRA_WATCH
             mutex = e['arg1']
             mutex_holder[mutex] = 0
+            if e['tid'] in wait_lock_time:
+                wait_lock_time[e['tid']][-1][2] = e['tsc']
 
     my_events.sort(key=events_sort_tsc)
     mh_events.sort(key=events_sort_tsc)
@@ -477,7 +503,7 @@ def parse_ldb(executable, mreq):
         e['detail'] += ", pc={}({})".format(hex(e['pc']), finfomap[e['pc']])
         e['fline'] = finfomap[e['pc']]
 
-    return my_events, thread_list, mh_events, mh_threads, min_tsc, max_tsc
+    return my_events, thread_list, mh_events, mh_threads, wait_lock_time, min_tsc, max_tsc
 
 def parse_perf(thread_list, min_tsc, max_tsc):
 #    print('Perf Data: {}'.format(PERF_DATA_FILENAME))
@@ -538,7 +564,7 @@ def parse_perf(thread_list, min_tsc, max_tsc):
     return row_in_time
 
 SVG_WIDTH = 1200
-SVG_HEIGHT = 600
+#SVG_HEIGHT = 1200
 XMARKS = 8
 BAR_COLORS = ['rgb(216, 10, 44)',
         'rgb(241,38,27)',
@@ -576,8 +602,8 @@ def addBar(dwg, x, y, width, height, text, fill):
 
     return r
 
-def addGraph(dwg, offset, events, duration, thread_id, isMutexHolder = False):
-    graph_height = SVG_HEIGHT - offset
+def addGraph(dwg, offset, events, wait_lock_time, duration, thread_id, isMutexHolder = False):
+    graph_height = dwg['height'] - offset
 
     # draw x axis
     dwg.add(dwg.line(start=(50,graph_height-50),
@@ -590,7 +616,7 @@ def addGraph(dwg, offset, events, duration, thread_id, isMutexHolder = False):
     spacingx = duration / (XMARKS-1)
 
     dwg.add(dwg.line(start=(50,graph_height-50-5),
-        end=(50,SVG_HEIGHT-offset-50+5),
+        end=(50,dwg['height']-offset-50+5),
         stroke="#000",
         fill="none",
         stroke_width=2))
@@ -664,10 +690,32 @@ def addGraph(dwg, offset, events, duration, thread_id, isMutexHolder = False):
             font_family="courier new",
             transform=pcRotate))
 
+    # draw critical section
+    for (wait, lock, unlock) in wait_lock_time:
+        if lock != -1 and unlock != -1:
+            lock_x = 50 + (SVG_WIDTH-70) * lock / duration
+            unlock_x = 50 + (SVG_WIDTH-70) * unlock / duration
+            r = dwg.rect((50 + lock_x, graph_height-50),
+                         (unlock_x - lock_x, 10))
+            r.fill("red", opacity=0.2)
+            dwg.add(r)
+
+        '''
+        if wait != -1:
+            wait_x = 50 + (SVG_WIDTH-70) * wait / duration
+            wait_y = graph_height - 50 - (max_level+1) * 16
+            dwg.add(dwg.line(start=(wait_x, wait_y),
+                             end = (wait_x, wait_y-10),
+                             stroke = "red",
+                             fill = "none",
+                             stroke_width="2"))
+        '''
+
+
     return 50 + (max_level + 1) * 16 + 30
 
 def generate_stats(executable, mreq):
-    my_events, my_threads, mh_events, mh_threads, min_tsc, max_tsc = parse_ldb(executable, mreq)
+    my_events, my_threads, mh_events, mh_threads, wait_lock_time, min_tsc, max_tsc = parse_ldb(executable, mreq)
     row_in_time = parse_perf(my_threads, min_tsc, max_tsc)
     duration = max_tsc - min_tsc
 
@@ -680,7 +728,18 @@ def generate_stats(executable, mreq):
     def events_sort_ngen(e):
         return e['ngen']
 
+    for tid in wait_lock_time:
+        for entry in wait_lock_time[tid]:
+            if entry[0] != -1:
+                entry[0] -= min_tsc
+            if entry[1] != -1:
+                entry[1] -= min_tsc
+            if entry[2] != -1:
+                entry[2] -= min_tsc
+
     ## Draw SVG
+    SVG_HEIGHT = (len(my_threads) + len(mh_threads)) * 160 + 100
+    print(len(my_threads)+len(mh_threads), SVG_HEIGHT)
     dwg = svgwrite.Drawing("req" + str(mreq) + ".svg", size=(SVG_WIDTH,SVG_HEIGHT))
 
     # draw background
@@ -689,11 +748,17 @@ def generate_stats(executable, mreq):
     vert_grad.add_stop_color(offset='95%', color='#eeeeb0', opacity=None)
     dwg.defs.add(vert_grad)
 
-    dwg.add(dwg.rect((0,0),(SVG_WIDTH,SVG_HEIGHT),fill="url(#background)"))
+    dwg.add(dwg.rect((0,0),(SVG_WIDTH,dwg['height']),fill="url(#background)"))
 
     # draw label
     dwg.add(dwg.text("Req ID = " + str(mreq),
-        insert = (20, 20),
+        insert=(20, 20),
+        font_size="12px",
+        font_family="Courier New",
+        font_weight="bold"))
+
+    dwg.add(dwg.text("Latency = {:.02f}".format(duration) + " us",
+        insert=(20, 40),
         font_size="12px",
         font_family="Courier New",
         font_weight="bold"))
@@ -705,7 +770,10 @@ def generate_stats(executable, mreq):
         events = list(filter(lambda e: e['thread_idx'] == thread_id, events))
 
         events.sort(key=events_sort_ngen)
-        offset += addGraph(dwg, offset, events, duration, thread_id) 
+        wlt = []
+        if thread_id in wait_lock_time:
+            wlt = wait_lock_time[thread_id]
+        offset += addGraph(dwg, offset, events, wlt, duration, thread_id) 
 
     for thread_id in mh_threads:
         events = list(filter(lambda e: e['event'] == 'MHOLDER_STACK_SAMPLE', mh_events))
@@ -717,7 +785,10 @@ def generate_stats(executable, mreq):
             continue
 
         events.sort(key=events_sort_ngen)
-        offset += addGraph(dwg, offset, events, duration, thread_id, True)
+        wlt = []
+        if thread_id in wait_lock_time:
+            wlt = wait_lock_time[thread_id]
+        offset += addGraph(dwg, offset, events, wlt, duration, thread_id, True)
 
     dwg.save()
 
