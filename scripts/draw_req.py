@@ -291,7 +291,7 @@ def parse_ldb(executable, mreq):
                     continue
 
                 if tid in thread_pending:
-                    if timestamp_us >= thread_pending[tid] + EXTRA_WATCH:
+                    if timestamp_us >= thread_pending[tid]:
                         thread_pending.pop(tid)
                         continue
                     if timestamp_us - latency_us > max_tsc:
@@ -360,26 +360,32 @@ def parse_ldb(executable, mreq):
 
                 if tag != mreq or tid not in thread_watch:
                     continue
-                
+
                 thread_watch.remove(tid)
-                thread_pending[tid] = timestamp_us
+                thread_pending[tid] = timestamp_us + EXTRA_WATCH
                 my_events.append({'tsc': timestamp_us,
                     'thread_idx': tid,
                     'pc': 0,
                     'event': "TAG_UNSET",
                     'detail': ""})
 
+                if max_tsc == 0 or max_tsc < timestamp_us:
+                    max_tsc = timestamp_us
+
             elif event_type == EVENT_TAG_CLEAR:
                 if tid not in thread_watch:
                     continue
 
                 thread_watch.remove(tid)
-                thread_pending[tid] = timestamp_us
+                thread_pending[tid] = timestamp_us + EXTRA_WATCH
                 my_events.append({'tsc': timestamp_us,
                     'thread_idx': tid,
                     'pc': 0,
                     'event': "TAG_CLEAR",
                     'detail': ""})
+
+                if max_tsc == 0 or max_tsc < timestamp_us:
+                    max_tsc = timestamp_us
 
             elif event_type == EVENT_MUTEX_WAIT:
                 mutex = arg1
@@ -695,7 +701,7 @@ def addGraph(dwg, offset, events, wait_lock_time, duration, thread_id, isMutexHo
         if lock != -1 and unlock != -1:
             lock_x = 50 + (SVG_WIDTH-70) * lock / duration
             unlock_x = 50 + (SVG_WIDTH-70) * unlock / duration
-            r = dwg.rect((50 + lock_x, graph_height-50),
+            r = dwg.rect((lock_x, graph_height-50),
                          (unlock_x - lock_x, 10))
             r.fill("red", opacity=0.2)
             dwg.add(r)
@@ -739,7 +745,6 @@ def generate_stats(executable, mreq):
 
     ## Draw SVG
     SVG_HEIGHT = (len(my_threads) + len(mh_threads)) * 160 + 100
-    print(len(my_threads)+len(mh_threads), SVG_HEIGHT)
     dwg = svgwrite.Drawing("req" + str(mreq) + ".svg", size=(SVG_WIDTH,SVG_HEIGHT))
 
     # draw background
