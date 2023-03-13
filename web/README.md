@@ -4,4 +4,4 @@
 1. Correctly set APP\_DIR and APP\_NAME in ``webserver.py``
 
 2. Launch web server with Flask
-  ** ``flask --app webserver run -p 8000``
+  * ``flask --app webserver run -p 8000``
