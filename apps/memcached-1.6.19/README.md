@@ -18,5 +18,5 @@
 5. Build with Makefile
   * ``memcached-1.6.19> make``
 
-6. Execute Memcached with LDB libary preloaded
-  * ``LD_PRELOAD=LLVM_DIR/libldb/libshim.so taskset 0x3fc ./memcached -p 16636 -v -m 10240 --threads=8`` (Note that core 1 is used for Stack Scanner and core 2 is for Logger by default)
+6. Execute Memcached with LDB libary preloaded (Note that core 1 is used for Stack Scanner and core 2 is for Logger by default)
+  * ``LD_PRELOAD=LLVM_DIR/libldb/libshim.so taskset 0x3fc ./memcached -p 16636 -v -m 10240 --threads=8`` 
