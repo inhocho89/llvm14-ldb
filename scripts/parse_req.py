@@ -578,6 +578,9 @@ def generate_stats(executable, mreq):
     all_events = my_events + mh_events + sched_events
     all_events.sort(key=events_sort_tsc)
 
+    print("executable: {}".format(executable))
+    print("req ID = {:d}\n".format(mreq))
+
     for e in all_events:
         print("{:.3f} ({:.3f}) [{:d}] {} {}"
               .format(e['tsc'], e['tsc'] - min_tsc, e['thread_idx'], e['event'], e['detail']))
