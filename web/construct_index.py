@@ -92,7 +92,18 @@ def generate_stats():
         f.write("</ul>\n")
         f.write("<h2> Percentiles </h2>\n")
         f.write("<ul>\n")
-        for i in range(101):
+
+        e = latencies[0]
+        f.write('<li>[p100] <a href="/req?id={:d}">{:d}</a>, {:.02f} us</li>\n'
+                .format(e['nreq'],e['nreq'], e['latency']))
+        e = latencies[int((N-1) * 0.0001)]
+        f.write('<li>[p99.99] <a href="/req?id={:d}">{:d}</a>, {:.02f} us</li>\n'
+                .format(e['nreq'],e['nreq'], e['latency']))
+        e = latencies[int((N-1) * 0.001)]
+        f.write('<li>[p99.9] <a href="/req?id={:d}">{:d}</a>, {:.02f} us</li>\n'
+                .format(e['nreq'],e['nreq'], e['latency']))
+
+        for i in range(1, 101):
             e = latencies[int((N-1) * (i / 100))]
             f.write('<li>[p{:d}] <a href="/req?id={:d}">{:d}</a>, {:.02f} us</li>\n'
                     .format(100-i, e['nreq'],e['nreq'], e['latency']))
