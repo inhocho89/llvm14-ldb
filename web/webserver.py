@@ -8,8 +8,7 @@ app = Flask(__name__)
 
 @app.before_first_request
 def construct_index():
-    if not os.path.exists('templates/index.html'):
-        os.system("python3 construct_index.py {}".format(APP_DIR))
+    os.system("python3 construct_index.py {}".format(APP_DIR))
 
 @app.route('/')
 def index():
