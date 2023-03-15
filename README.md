@@ -33,9 +33,7 @@
 ### Parsing the data
 The raw data is in ldb.data (by LDB) and perf.data (by perf).
 1. Parsing latency distribution for each function (this will only use LDB data)
-  * ``llvm14-ldb/apps/demo> python3 ../../scripts/parse_ldb.py demo > output``
+  * ``llvm14-ldb/apps/demo> python3 ../../scripts/parse_summary.py demo > summary``
 
 2. Parsing timeline of a request
-  * ``llvm14-ldb/apps/demo> python3 ../../scripts/parse_ldb_req.py demo 100 > out100``
-
-
+  * ``llvm14-ldb/apps/demo> python3 ../../scripts/parse_req.py demo 100 > req100``
