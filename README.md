@@ -26,7 +26,7 @@
   * ``llvm14-ldb/apps/demo> sudo perf sched record -k CLOCK_MONOTONIC_RAW``
 
 3. Run application with preloading LDB shim layer.
-  * ``llvm14-ldb/apps/demo> LD_PRELOAD=/path/to/llvm14-ldb/libldb/ldbshim.so ./demo``
+  * ``llvm14-ldb/apps/demo> LD_PRELOAD=/path/to/llvm14-ldb/libldb/libshim.so ./demo``
 
 4. When enough data is collected (when the application exits), stop the perf
 
