@@ -31,7 +31,8 @@
 #define CYCLES_PER_US 2396
 
 constexpr uint16_t kBarrierPort = 41;
-constexpr int kMaxBufLen = 4096;
+constexpr int kMaxBufLen = 2048;
+constexpr int kMinValueLen = 4;
 constexpr int kMaxValueLen = 1024;
 
 namespace {
@@ -57,7 +58,7 @@ int total_agents = 1;
 // Total duration of the experiment in us
 //constexpr uint64_t kWarmUpTime = 2000000;
 constexpr uint64_t kWarmUpTime = 0;
-constexpr uint64_t kExperimentTime = 4000000;
+constexpr uint64_t kExperimentTime = 10000000;
 // RTT
 constexpr uint64_t kRTT = 1000;
 
@@ -388,7 +389,7 @@ std::vector<work_unit> GenerateWork(Arrival a, double cur_us,
     u->req = (char *)malloc(kMaxBufLen);
     if (wtype == 1) {
       // SET
-      value_len = r_ % kMaxValueLen;
+      value_len = r_ % (kMaxValueLen - kMinValueLen) + kMinValueLen;
       GenerateRandomString(value, value_len, r_);
       u->req_len = ConstructMemcachedSetReq(u->req, kMaxBufLen, id, key.c_str(),
 					    key.length(), value, value_len);
@@ -498,7 +499,8 @@ std::vector<work_unit> ClientWorker(
     uint64_t now = rdtsc();
     barrier();
     if (now - expstart < w[i].start_us * CYCLES_PER_US) {
-      __time_delay_us(w[i].start_us - 1.0 * (now - expstart) / CYCLES_PER_US);
+      double sleep_for = w[i].start_us - 1.0 * (now - expstart) / CYCLES_PER_US;
+      __time_delay_us(sleep_for);
       //usleep(w[i].start_us - 1.0 * (now - expstart) / CYCLES_PER_US);
     }
     if ((now - expstart) > (w[i].start_us + kMaxCatchUpUS) * CYCLES_PER_US)
@@ -699,10 +701,20 @@ void PrintStatResults(std::vector<work_unit> w, struct cstat *cs) {
   std::ofstream cdf_out;
   cdf_out.open("latency.cdf", std::fstream::out);
 
-  for (int i = 0; i <= 1000; ++i) {
+  for (int i = 0; i < 1000; ++i) {
     double i_ = i / 1000.0;
     cdf_out << i_ << "," << w[(count - 1) * (1.0 - i_)].duration_us << std::endl;
   }
+
+  cdf_out << "0.9999," << w[(count - 1) * 0.0001].duration_us << std::endl;
+  cdf_out << "0.99995," << w[(count - 1) * 0.00005].duration_us << std::endl;
+  cdf_out << "0.99999," << w[(count - 1) * 0.00001].duration_us << std::endl;
+  cdf_out << "0.999995," << w[(count - 1) * 0.000005].duration_us << std::endl;
+  cdf_out << "0.999999," << w[(count - 1) * 0.000001].duration_us << std::endl;
+  cdf_out << "0.9999995," << w[(count - 1) * 0.0000005].duration_us << std::endl;
+  cdf_out << "0.9999999," << w[(count - 1) * 0.0000001].duration_us << std::endl;
+  cdf_out << "0.99999995," << w[(count - 1) * 0.00000005].duration_us << std::endl;
+  cdf_out << "1.0," << w[0].duration_us << std::endl;
   
   cdf_out.close();
 
