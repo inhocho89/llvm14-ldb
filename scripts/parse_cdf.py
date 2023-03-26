@@ -76,18 +76,17 @@ def generate_stats():
 
     for i_ in range(1000):
         i = i_ / 1000.0
-        print("{:f}, {:f}".format(i, latencies[int((N-1) * i)]))
+        print("{:.08f}, {:f}".format(i, latencies[int((N-1) * i)]))
 
-    print("{:f}, {:f}".format(0.9999, latencies[int((N-1) * 0.9999)]))
-    print("{:f}, {:f}".format(0.99995, latencies[int((N-1) * 0.99995)]))
-    print("{:f}, {:f}".format(0.99999, latencies[int((N-1) * 0.99999)]))
-    print("{:f}, {:f}".format(0.999995, latencies[int((N-1) * 0.999995)]))
-    print("{:f}, {:f}".format(0.999999, latencies[int((N-1) * 0.999999)]))
-    print("{:f}, {:f}".format(0.9999995, latencies[int((N-1) * 0.9999995)]))
-    print("{:f}, {:f}".format(0.9999999, latencies[int((N-1) * 0.9999999)]))
-    print("{:f}, {:f}".format(0.99999995, latencies[int((N-1) * 0.99999995)]))
-    print("{:f}, {:f}".format(1.0, latencies[N-1]))
-    print("avg = {:f}".format(sum(latencies)/N))
+    print("{:.08f}, {:f}".format(0.9999, latencies[int((N-1) * 0.9999)]))
+    print("{:.08f}, {:f}".format(0.99995, latencies[int((N-1) * 0.99995)]))
+    print("{:.08f}, {:f}".format(0.99999, latencies[int((N-1) * 0.99999)]))
+    print("{:.08f}, {:f}".format(0.999995, latencies[int((N-1) * 0.999995)]))
+    print("{:.08f}, {:f}".format(0.999999, latencies[int((N-1) * 0.999999)]))
+    print("{:.08f}, {:f}".format(0.9999995, latencies[int((N-1) * 0.9999995)]))
+    print("{:.08f}, {:f}".format(0.9999999, latencies[int((N-1) * 0.9999999)]))
+    print("{:.08f}, {:f}".format(0.99999995, latencies[int((N-1) * 0.99999995)]))
+    print("{:.08f}, {:f}".format(1.0, latencies[N-1]))
 
 if __name__ == '__main__':
     if len(sys.argv) != 1:

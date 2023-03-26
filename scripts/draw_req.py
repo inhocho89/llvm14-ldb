@@ -585,6 +585,7 @@ BAR_COLORS = ['rgb(216, 10, 44)',
 
 def addBar(dwg, x, y, width, height, text, fill):
     g = dwg.g()
+    g.set_desc(None, text)
     
     # rect
     r = dwg.rect((x,y),(width,height), rx=2, ry=2, fill=fill)
