@@ -289,6 +289,7 @@ def parse_ldb(executable, mreq):
 
     mutex_holder = {}   # map: mutex -> tid
     mh_watch = []       # mutex holder that I'm watching
+    mh_pending = {}
 
     pcs = []
     min_tsc = 0
@@ -310,10 +311,15 @@ def parse_ldb(executable, mreq):
             arg3 = int.from_bytes(byte[32:40], "little")
 
             # handle pending watching threads
-            expired = [etid for etid in thread_pending if thread_pending[etid] > timestamp_us]
+            expired = [etid for etid in thread_pending if thread_pending[etid] < timestamp_us]
             for etid in expired:
                 thread_watch.remove(etid)
                 del thread_pending[etid]
+
+            expired = [etid for etid in mh_pending if mh_pending[etid] < timestamp_us]
+            for etid in expired:
+                mh_watch.remove(etid)
+                del mh_pending[etid]
 
             if event_captured and len(thread_watch) == 0 and len(mh_watch) == 0:
                 break
@@ -448,7 +454,7 @@ def parse_ldb(executable, mreq):
             elif event_type == EVENT_MUTEX_UNLOCK:
                 mutex = arg1
                 if tid in mh_watch:
-                    mh_watch.remove(tid)
+                    mh_pending[tid] = timestamp_us + EXTRA_WATCH
 
                 if tid in thread_watch:
                     lock_time = -1.0
