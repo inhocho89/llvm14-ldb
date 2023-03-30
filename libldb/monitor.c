@@ -2,7 +2,7 @@
 #include <time.h>
 #include "common.h"
 
-#define LDB_MONITOR_PERIOD 0
+#define LDB_MONITOR_PERIOD 1
 
 extern ldb_shmseg *ldb_shared;
 extern bool running;
