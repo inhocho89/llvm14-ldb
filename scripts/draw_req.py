@@ -712,7 +712,7 @@ def addGraph(dwg, offset, events, wait_lock_time, duration, thread_id, isMutexHo
     for (wait, lock, unlock) in wait_lock_time:
         if lock == -1 and unlock == -1:
             continue
-        lock_x = 50
+        lock_x = 0
         unlock_x = 50 + (SVG_WIDTH-70)
         if lock != -1:
             lock_x = 50 + (SVG_WIDTH-70) * lock / duration
