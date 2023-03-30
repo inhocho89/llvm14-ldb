@@ -25,7 +25,6 @@ from elftools.elf.elffile import ELFFile
 EXTRA_WATCH = 100
 
 LDB_DATA_FILENAME = "ldb.data"
-LDB_DATA_ORDERED_FILENAME = "ldb.data.ordered"
 MAPS_DATA_FILENAME = "maps.data"
 PERF_DATA_FILENAME = "perf.data"
 PERF_DEC_FILENAME = "perf.dec"
@@ -241,64 +240,24 @@ def get_finfos(dwarfinfo, mapsinfo, addresses):
 
     return finfomap
 
-def parse_ldb(executable, mreq):
+def parse_ldb(executable):
 #    print('LDB Data: {}'.format(LDB_DATA_FILENAME))
     dwarfinfo = parse_elf(executable)
     mapsinfo = parse_maps()
 
-    if not os.path.exists(LDB_DATA_ORDERED_FILENAME) or \
-            (os.path.getmtime(LDB_DATA_FILENAME) > os.path.getmtime(LDB_DATA_ORDERED_FILENAME)):
-        all_events = []
-        with open(LDB_DATA_FILENAME, 'rb') as ldb_bin:
-            while (byte := ldb_bin.read(40)):
-                event_type = int.from_bytes(byte[0:4], "little")
-                ts_sec = int.from_bytes(byte[4:8], "little")
-                ts_nsec = int.from_bytes(byte[8:12], "little")
-                timestamp_us = ts_sec * 1000000 + ts_nsec / 1000.0
-                tid = int.from_bytes(byte[12:16], "little")
-                arg1 = int.from_bytes(byte[16:24], "little")
-                arg2 = int.from_bytes(byte[24:32], "little")
-                arg3 = int.from_bytes(byte[32:40], "little")
-
-                all_events.append({'tsc': timestamp_us,
-                    'event_type': event_type,
-                    'tid': tid,
-                    'arg1': arg1,
-                    'arg2': arg2,
-                    'arg3': arg3})
-        
-        all_events.sort(key=lambda entry: entry['tsc'])
-
-        with open(LDB_DATA_ORDERED_FILENAME, 'wb') as ldb_bin:
-            for event in all_events:
-                ts_sec = int(event['tsc'] / 1000000)
-                ts_nsec = int((event['tsc'] * 1000) % 1000000000)
-                ldb_bin.write(event['event_type'].to_bytes(4, "little"))
-                ldb_bin.write(ts_sec.to_bytes(4, "little"))
-                ldb_bin.write(ts_nsec.to_bytes(4, "little"))
-                ldb_bin.write(event['tid'].to_bytes(4, "little"))
-                ldb_bin.write(event['arg1'].to_bytes(8, "little"))
-                ldb_bin.write(event['arg2'].to_bytes(8, "little"))
-                ldb_bin.write(event['arg3'].to_bytes(8, "little"))
-
     my_events = []      # list of related event entries
     thread_list = []    # list of thread related to mreq
-
-    thread_watch = []   # list of thread to watch
-    thread_pending = {}
-
-    mutex_holder = {}   # map: mutex -> tid
-    mh_watch = []       # mutex holder that I'm watching
-
     pcs = []
+    nthread = 0
     min_tsc = 0
     max_tsc = 0
     last_mutex_ts = {}
 
-    event_captured = False
+    all_events = []     # all the events happend while tag is set
+    wait_lock_time = {}
 
     # collect latency informations
-    with open(LDB_DATA_ORDERED_FILENAME, 'rb') as ldb_bin:
+    with open(LDB_DATA_FILENAME, 'rb') as ldb_bin:
         while (byte := ldb_bin.read(40)):
             event_type = int.from_bytes(byte[0:4], "little")
             ts_sec = int.from_bytes(byte[4:8], "little")
@@ -309,30 +268,11 @@ def parse_ldb(executable, mreq):
             arg2 = int.from_bytes(byte[24:32], "little")
             arg3 = int.from_bytes(byte[32:40], "little")
 
-            # handle pending watching threads
-            expired = [etid for etid in thread_pending if thread_pending[etid] > timestamp_us]
-            for etid in expired:
-                thread_watch.remove(etid)
-                del thread_pending[etid]
-
-            if event_captured and len(thread_watch) == 0 and len(mh_watch) == 0:
-                break
-
             if event_type == EVENT_STACK_SAMPLE:
                 latency_us = arg1 / 1000.0
                 pc = arg2
                 ngen = arg3
                 event_str = ""
-                detail_str = ""
-
-                if tid not in thread_watch and tid not in mh_watch:
-                    continue
-
-                if tid in thread_watch:
-                    event_str = "STACK_SAMPLE"
-                elif tid in mh_watch:
-                    event_str = "***MHOLDER_STACK_SAMPLE"
-
                 detail_str = "ngen={:d}, latency={:.3f} us".format(ngen, latency_us)
 
                 pc -= 5
@@ -343,7 +283,7 @@ def parse_ldb(executable, mreq):
                     'pc': pc,
                     'ngen': ngen,
                     'latency_us': latency_us,
-                    'event': event_str,
+                    'event': "STACK_SAMPLE",
                     'detail': detail_str})
 
                 if pc not in pcs:
@@ -352,119 +292,93 @@ def parse_ldb(executable, mreq):
             elif event_type == EVENT_TAG_SET:
                 tag = arg1
 
-                if tag != mreq:
-                    continue
-
-                if tid not in thread_watch:
-                    thread_watch.append(tid)
-
-                if tid not in thread_list:
-                    thread_list.append(tid)
-
-                if tid in thread_pending:
-                    del thread_pending[tid]
-
                 my_events.append({'tsc': timestamp_us,
                     'thread_idx': tid,
                     'pc': 0,
                     'event': "TAG_SET",
-                    'detail': ""})
-
-                if min_tsc == 0 or min_tsc > timestamp_us:
-                    min_tsc = timestamp_us
-
-                event_captured = True
+                    'detail': "tag = {:d}".format(tag)})
 
             elif event_type == EVENT_TAG_BLOCK:
                 tag = arg1
 
-                if tag != mreq or tid not in thread_watch:
-                    continue
-
-                thread_pending[tid] = timestamp_us + EXTRA_WATCH
                 my_events.append({'tsc': timestamp_us,
                     'thread_idx': tid,
                     'pc': 0,
                     'event': "TAG_BLOCK",
-                    'detail': ""})
+                    'detail': "tag = {:d}".format(tag)})
 
             elif event_type == EVENT_TAG_UNSET:
                 tag = arg1
 
-                if tag != mreq or tid not in thread_watch:
-                    continue
-
-                thread_pending[tid] = timestamp_us + EXTRA_WATCH
                 my_events.append({'tsc': timestamp_us,
                     'thread_idx': tid,
                     'pc': 0,
                     'event': "TAG_UNSET",
-                    'detail': ""})
-
-                if max_tsc == 0 or max_tsc < timestamp_us:
-                    max_tsc = timestamp_us
+                    'detail': "tag = {:d}".format(tag)})
 
             elif event_type == EVENT_TAG_CLEAR:
-                if tid not in thread_watch:
-                    continue
-
-                thread_pending[tid] = timestamp_us + EXTRA_WATCH
                 my_events.append({'tsc': timestamp_us,
                     'thread_idx': tid,
                     'pc': 0,
                     'event': "TAG_CLEAR",
                     'detail': ""})
 
-                if max_tsc == 0 or max_tsc < timestamp_us:
-                    max_tsc = timestamp_us
-
             elif event_type == EVENT_MUTEX_WAIT:
                 mutex = arg1
-                if tid in thread_watch:
-                    if mutex in mutex_holder and mutex_holder[mutex] != 0:
-                        mh_watch.append(mutex_holder[mutex])
-                    my_events.append({'tsc': timestamp_us,
-                        'thread_idx': tid,
-                        'pc': 0,
-                        'event': "MUTEX_WAIT",
-                        'detail': "mutex={}".format(hex(mutex))})
+                my_events.append({'tsc': timestamp_us,
+                    'thread_idx': tid,
+                    'pc': 0,
+                    'event': "MUTEX_WAIT",
+                    'detail': "mutex={}".format(hex(mutex))})
                 last_mutex_ts[tid] = timestamp_us
+                if tid not in wait_lock_time:
+                    wait_lock_time[tid] = []
+                wait_lock_time[tid].append([timestamp_us, -1, -1])
 
             elif event_type == EVENT_MUTEX_LOCK:
                 mutex = arg1
-                if tid in thread_watch:
-                    wait_time = -1.0
-                    if tid in last_mutex_ts:
-                        wait_time = timestamp_us - last_mutex_ts[tid]
-                    my_events.append({'tsc': timestamp_us,
-                        'thread_idx': tid,
-                        'pc': 0,
-                        'event': "MUTEX_LOCK",
-                        'detail': "mutex={}, wait_time={:.3f} us"\
-                                .format(hex(mutex), wait_time)})
+                wait_time = -1.0
+                if tid in last_mutex_ts:
+                    wait_time = timestamp_us - last_mutex_ts[tid]
+                my_events.append({'tsc': timestamp_us,
+                    'thread_idx': tid,
+                    'pc': 0,
+                    'event': "MUTEX_LOCK",
+                    'detail': "mutex={}, wait_time={:.3f} us"\
+                            .format(hex(mutex), wait_time)})
                 last_mutex_ts[tid] = timestamp_us
-                mutex_holder[mutex] = tid
+
+                if tid in wait_lock_time:
+                    wait_lock_time[tid][-1][1] = timestamp_us
 
             elif event_type == EVENT_MUTEX_UNLOCK:
                 mutex = arg1
-                if tid in mh_watch:
-                    mh_watch.remove(tid)
-
-                if tid in thread_watch:
-                    lock_time = -1.0
-                    if tid in last_mutex_ts:
-                        lock_time = timestamp_us - last_mutex_ts[tid]
-                    my_events.append({'tsc': timestamp_us,
-                        'thread_idx': tid,
-                        'pc': 0,
-                        'event': "MUTEX_UNLOCK",
-                        'detail': "mutex={}, lock_time={:f} us"\
-                                .format(hex(mutex), lock_time)})
-
+                lock_time = -1.0
                 if tid in last_mutex_ts:
-                    del last_mutex_ts[tid]
+                    lock_time = timestamp_us - last_mutex_ts[tid]
+                my_events.append({'tsc': timestamp_us,
+                    'thread_idx': tid,
+                    'pc': 0,
+                    'event': "MUTEX_UNLOCK",
+                    'detail': "mutex={}, lock_time={:f} us"\
+                            .format(hex(mutex), lock_time)})
+                if tid in last_mutex_ts:
+                    last_mutex_ts.pop(tid)
 
-                mutex_holder[mutex] = 0
+                if tid in wait_lock_time:
+                    wait_lock_time[tid][-1][2] = timestamp_us
+
+            # my event
+            if min_tsc == 0 or min_tsc > timestamp_us:
+                min_tsc = timestamp_us
+
+            if max_tsc == 0 or max_tsc < timestamp_us:
+                max_tsc = timestamp_us
+
+    def events_sort_tsc(e):
+        return e['tsc']
+
+    my_events.sort(key=events_sort_tsc)
 
     # parse pcs
     finfomap = get_finfos(dwarfinfo, mapsinfo, pcs)
@@ -476,7 +390,7 @@ def parse_ldb(executable, mreq):
         e['detail'] += ", pc={}, {}".format(hex(e['pc']), finfomap[e['pc']])
         e['fline'] = finfomap[e['pc']]
 
-    return my_events, thread_list, min_tsc, max_tsc
+    return my_events, thread_list, wait_lock_time, min_tsc, max_tsc
 
 def parse_perf(thread_list, min_tsc, max_tsc):
 #    print('Perf Data: {}'.format(PERF_DATA_FILENAME))
@@ -536,8 +450,8 @@ def parse_perf(thread_list, min_tsc, max_tsc):
                 'detail': "cpu_id={:d}, {}".format(cpu_id, bpf_output)})
     return row_in_time
 
-def generate_stats(executable, mreq):
-    my_events, my_threads, min_tsc, max_tsc = parse_ldb(executable, mreq)
+def generate_stats(executable):
+    my_events, my_threads, wait_lock_time, min_tsc, max_tsc = parse_ldb(executable)
     sched_events = parse_perf(my_threads, min_tsc, max_tsc)
 
     def events_sort_tsc(e):
@@ -547,7 +461,6 @@ def generate_stats(executable, mreq):
     all_events.sort(key=events_sort_tsc)
 
     print("executable: {}".format(executable))
-    print("req ID = {:d}\n".format(mreq))
 
     for e in all_events:
         print("{:.3f} ({:.3f}) [{:d}] {} {}"
@@ -555,7 +468,7 @@ def generate_stats(executable, mreq):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        print('Expected usage: {0} <executable> <req#>'.format(sys.argv[0]))
+    if len(sys.argv) != 2:
+        print('Expected usage: {0} <executable>'.format(sys.argv[0]))
         sys.exit(1)
-    generate_stats(sys.argv[1], int(sys.argv[2]))
+    generate_stats(sys.argv[1])
