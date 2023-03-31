@@ -71,16 +71,11 @@ static inline __attribute__((always_inline)) char *rdfsbase() {
   return fsbase;
 }
 
-static inline int event_len(ldb_event_handle_t *event) {
-  int i = event->tail - event->head;
-  return (LDB_EVENT_BUF_SIZE + (i % LDB_EVENT_BUF_SIZE)) % LDB_EVENT_BUF_SIZE;
-}
-
 static void event_record(ldb_event_handle_t *event, int event_type, struct timespec ts,
 		uint32_t tid, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
   pthread_mutex_lock(&event->m_event);
   // now this becomes very unlikely
-  if ((event->tail + 1) % LDB_EVENT_BUF_SIZE == event->head) {
+  if (event->tail - event->head >= LDB_EVENT_BUF_SIZE) {
     event->nignored++;
     pthread_cond_broadcast(&event->cv_event);
     pthread_mutex_unlock(&event->m_event);
@@ -97,8 +92,9 @@ static void event_record(ldb_event_handle_t *event, int event_type, struct times
   entry->arg2 = arg2;
   entry->arg3 = arg3;
 
-  event->tail = (event->tail + 1) % LDB_EVENT_BUF_SIZE;
-  if (event_len(event) >= LDB_EVENT_THRESH ||
+  barrier();
+  event->tail++;
+  if (event->tail - event->head >= LDB_EVENT_THRESH ||
       ts.tv_sec - event->last_write >= LDB_EVENT_MIN_INT) {
     pthread_cond_broadcast(&event->cv_event);
   }

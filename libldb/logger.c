@@ -44,24 +44,19 @@ void *logger_main(void *arg) {
 
       ebuf = ldb_shared->ldb_thread_infos[tidx].ebuf;
       head = ebuf->head;
-      len = (LDB_EVENT_BUF_SIZE + ((ebuf->tail - head) % LDB_EVENT_BUF_SIZE)) % LDB_EVENT_BUF_SIZE;
+      barrier();
+      len = ebuf->tail - head;
 
       if (len == 0) {
         continue;
       }
+      int end = LDB_EVENT_BUF_SIZE - (head % LDB_EVENT_BUF_SIZE);
+      if (len > end) len = end;
 
-      if (head + len <= LDB_EVENT_BUF_SIZE) {
-        fwrite(&ebuf->events[head], sizeof(ldb_event_entry), len, ldb_fout);
-      } else {
-        fwrite(&ebuf->events[head], sizeof(ldb_event_entry), LDB_EVENT_BUF_SIZE - head,
-            ldb_fout);
-        fwrite(&ebuf->events[0], sizeof(ldb_event_entry), (head + len) % LDB_EVENT_BUF_SIZE,
-            ldb_fout);
-      }
-
+      fwrite(&ebuf->events[head % LDB_EVENT_BUF_SIZE], sizeof(ldb_event_entry), len, ldb_fout);
       fflush(ldb_fout);
 
-      ebuf->head = (head + len) % LDB_EVENT_BUF_SIZE;
+      ebuf->head = head + len;
     }// for
   }// while (running)
 
