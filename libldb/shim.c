@@ -127,7 +127,8 @@ void *__ldb_thread_start(void *arg) {
   // start tracking
   pthread_spin_lock(&(ldb_shared->ldb_tlock));
   tidx = get_tidx();
-  ldb_shared->ldb_thread_infos[tidx].id = syscall(SYS_gettid);
+  pid_t id = syscall(SYS_gettid);
+  ldb_shared->ldb_thread_infos[tidx].id = id;
   ldb_shared->ldb_thread_infos[tidx].fsbase = (char **)(rdfsbase());
   ldb_shared->ldb_thread_infos[tidx].stackbase = rbp;
   ldb_shared->ldb_thread_infos[tidx].ebuf = ebuf;
@@ -139,8 +140,16 @@ void *__ldb_thread_start(void *arg) {
 
   register_thread_info(tidx);
 
+  // record an event for the creation of the thread
+  event_record(ebuf, LDB_EVENT_THREAD_CREATE, now, id,
+               (uintptr_t)real_thread_params.worker_func, 0, 0);
+
   // execute real thread
   ret = real_thread_params.worker_func(real_thread_params.param);
+
+  // record an event for the exiting of the thread
+  clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+  event_record(ebuf, LDB_EVENT_THREAD_EXIT, now, id, 0, 0, 0);
 
   // stop tracking
   pthread_spin_lock(&(ldb_shared->ldb_tlock));
@@ -212,6 +221,7 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
 
   if (unlikely(!real_pthread_mutex_lock)) {
     real_pthread_mutex_lock = dlsym(RTLD_NEXT, "pthread_mutex_lock");
+    printf("found pthread_mutex_lock %p\n", real_pthread_mutex_lock);
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
       return -1;
@@ -237,6 +247,7 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex) {
 
   if (unlikely(!real_pthread_mutex_unlock)) {
     real_pthread_mutex_unlock = dlsym(RTLD_NEXT, "pthread_mutex_unlock");
+    printf("found pthread_mutex_unlock %p\n", real_pthread_mutex_unlock);
     if ((error = dlerror()) != NULL) {
       fputs(error, stderr);
       return -1;

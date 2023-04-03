@@ -29,7 +29,7 @@
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #endif
 
-enum ldb_event_type{
+enum ldb_event_type {
   LDB_EVENT_STACK = 1,
   LDB_EVENT_TAG_SET,
   LDB_EVENT_TAG_BLOCK,
@@ -39,7 +39,9 @@ enum ldb_event_type{
   LDB_EVENT_MUTEX_LOCK,
   LDB_EVENT_MUTEX_UNLOCK,
   LDB_EVENT_JOIN_WAIT,
-  LDB_EVENT_JOIN_JOINED
+  LDB_EVENT_JOIN_JOINED,
+  LDB_EVENT_THREAD_CREATE,
+  LDB_EVENT_THREAD_EXIT,
 };
 
 typedef struct {
