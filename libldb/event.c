@@ -27,6 +27,8 @@ void event_record(ldb_event_buffer_t *ebuf, int event_type, struct timespec ts,
   e->arg2 = arg2;
   e->arg3 = arg3;
 
+  barrier();
+
   ebuf->tail = tail + 1;
 }
 
