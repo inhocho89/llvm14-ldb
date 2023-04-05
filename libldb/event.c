@@ -8,13 +8,16 @@ void event_record(ldb_event_buffer_t *ebuf, int event_type, struct timespec ts,
   if (unlikely(!ebuf || !ebuf->events))
     return;
 
-  if ((ebuf->tail + 1) % LDB_EVENT_BUF_SIZE == ebuf->head) {
+  int tail = ebuf->tail;
+  barrier();
+  
+  if (tail >= ebuf->head + LDB_EVENT_BUF_SIZE) {
     //fprintf(stderr, "[%d] WARNING: event buffer full: event ignored\n", syscall(SYS_gettid));
     ebuf->nignored++;
     return;
   }
 
-  ldb_event_entry *e = &ebuf->events[ebuf->tail];
+  ldb_event_entry *e = &ebuf->events[tail % LDB_EVENT_BUF_SIZE];
 
   e->event_type = event_type;
   e->sec = ts.tv_sec;
@@ -24,7 +27,7 @@ void event_record(ldb_event_buffer_t *ebuf, int event_type, struct timespec ts,
   e->arg2 = arg2;
   e->arg3 = arg3;
 
-  ebuf->tail = (ebuf->tail + 1) % LDB_EVENT_BUF_SIZE;
+  ebuf->tail = tail + 1;
 }
 
 inline void event_record_now(int event_type, uint64_t arg1, uint64_t arg2, uint64_t arg3) {
