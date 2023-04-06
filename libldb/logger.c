@@ -47,7 +47,7 @@ void *logger_main(void *arg) {
       barrier();
       len = ebuf->tail - head;
 
-      if (len == 0) {
+      if (len <= 0) {
         continue;
       }
       int end = LDB_EVENT_BUF_SIZE - (head % LDB_EVENT_BUF_SIZE);
