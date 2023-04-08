@@ -65,8 +65,6 @@ void __ldbInit(void) {
 
 void __ldbExit(void) {
   void *ret;
-  // Remove main thread's fsbase
-  ldb_shared->ldb_thread_infos[0].fsbase = NULL;
 
   // Join monitor and destroy spin lock?
   printf("Main app is exiting...\n");

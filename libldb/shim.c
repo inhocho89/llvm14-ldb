@@ -30,10 +30,12 @@ static inline __attribute__((always_inline)) uint64_t get_ngen() {
 
 static inline int get_tidx() {
   // find reusable slot
-  for (int i = 0; i < ldb_shared->ldb_max_idx; ++i) {
-    if (ldb_shared->ldb_thread_infos[i].fsbase == NULL) {
-      ldb_shared->ldb_nthread++;
-      return i;
+  if (ldb_shared->ldb_nthread != ldb_shared->ldb_max_idx) {
+    for (int i = 0; i < ldb_shared->ldb_max_idx; ++i) {
+      if (ldb_shared->ldb_thread_infos[i].fsbase == NULL) {
+        ldb_shared->ldb_nthread++;
+        return i;
+      }
     }
   }
 
