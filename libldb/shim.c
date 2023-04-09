@@ -23,7 +23,7 @@ typedef struct {
 static inline __attribute__((always_inline)) uint64_t get_ngen() {
   uint64_t ngen;
 
-  asm volatile ("movq %%fs:-16, %0 \n\t" : "=r"(ngen) :: "memory");
+  asm volatile ("movq %%fs:-344, %0 \n\t" : "=r"(ngen) :: "memory");
 
   return ngen;
 }
@@ -108,7 +108,7 @@ void *__ldb_thread_start(void *arg) {
   *((uint64_t *)rbp) = 0;
 
   printf("New interposed thread is starting... thread ID = %ld\n", syscall(SYS_gettid));
-  printf("ngen = %lu, tls rbp = %p, real rbp = %p\n", get_ngen(), get_fs_rbp(), get_rbp());
+  printf("ngen = %lu, tls rbp = %p, real rbp = %p, tls = %p - %p\n", get_ngen(), get_fs_rbp(), get_rbp(), (void *)(rdfsbase()-200), (void *)rdfsbase());
 
   // attach shared memory
   if (unlikely(!ldb_shared)) {

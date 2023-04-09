@@ -16,50 +16,33 @@ bool llvm::insertLDBGlobals(Module &M) {
   if (!M.getFunction("main"))
     return false;
 
-  // declare global variables only for module containing main function
-  Type *BaseTy = Type::getInt64Ty(M.getContext());
-  M.getOrInsertGlobal("__ldb_base", BaseTy, [&] {
-    GlobalVariable *g =
-      new GlobalVariable(M, BaseTy, false, GlobalVariable::ExternalLinkage,
-			 nullptr, "__ldb_base", nullptr,
-			 GlobalVariable::GeneralDynamicTLSModel);
-      g->setInitializer(Constant::getNullValue(BaseTy));
-      g->setDSOLocal(true);
-      g->setAlignment(llvm::Align(8));
-      return g;
-  });
+  // allocate tls (400 bytes = 8 bytes * 50)
+  // for safety let's reserve 25 byte
 
-  Type *TagTy = Type::getInt64Ty(M.getContext());
-  M.getOrInsertGlobal("__ldb_tag", TagTy, [&] {
-    GlobalVariable *g =
-      new GlobalVariable(M, TagTy, false, GlobalVariable::ExternalLinkage,
-			 nullptr, "__ldb_tag", nullptr,
-			 GlobalVariable::GeneralDynamicTLSModel);
-      g->setInitializer(Constant::getNullValue(TagTy));
-      g->setDSOLocal(true);
-      g->setAlignment(llvm::Align(8));
-      return g;
-  });
+  // offset           contents
+  // -400       [padding]
+  // -352       [padding]
+  // -344       [generation number (8 bytes)]
+  // -336       [padding]
+  //  ...       [padding]
+  // -288       [padding]
+  // -280       [most recent RBP (8 bytes)]
+  // -272       [padding]
+  //  ...       [padding]
+  // -224       [padding]
+  // -216       [canary (8 bytes)]
+  // -208       [thread local index (8 bytes)]
+  // -200       [Reserved for safety]
+  //  ...       [Reserved for safety]
+  //   -8       [Reserved for safety]
 
-  Type *NgenTy = Type::getInt64Ty(M.getContext());
-  M.getOrInsertGlobal("__ldb_ngen", NgenTy, [&] {
+  Type *ArrTy = ArrayType::get(Type::getInt64Ty(M.getContext()), 50);
+  M.getOrInsertGlobal("__ldb_reserved", ArrTy, [&] {
     GlobalVariable *g =
-      new GlobalVariable(M, NgenTy, false, GlobalVariable::ExternalLinkage,
-			 nullptr, "__ldb_ngen", nullptr,
-			 GlobalVariable::GeneralDynamicTLSModel);
-      g->setInitializer(Constant::getNullValue(NgenTy));
-      g->setDSOLocal(true);
-      g->setAlignment(llvm::Align(8));
-      return g;
-  });
-
-  Type *RbpTy = Type::getInt8PtrTy(M.getContext());
-  M.getOrInsertGlobal("__ldb_rbp", RbpTy, [&] {
-    GlobalVariable *g =
-      new GlobalVariable(M, RbpTy, false, GlobalVariable::ExternalLinkage,
-			 nullptr, "__ldb_rbp", nullptr,
-			 GlobalVariable::GeneralDynamicTLSModel);
-      g->setInitializer(Constant::getNullValue(RbpTy));
+      new GlobalVariable(M, ArrTy, false, GlobalVariable::ExternalLinkage,
+       nullptr, "__ldb_reserved", nullptr,
+       GlobalVariable::GeneralDynamicTLSModel);
+      g->setInitializer(Constant::getNullValue(ArrTy));
       g->setDSOLocal(true);
       g->setAlignment(llvm::Align(8));
       return g;

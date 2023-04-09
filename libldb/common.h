@@ -55,8 +55,10 @@ typedef struct {
 }__attribute__((packed, aligned(8))) ldb_event_entry;
 
 typedef struct {
-  int head;   // current read index
+  uint64_t head;   // current read index
+  char pad1[56];
   int tail;   // current write index
+  char pad2[56];
   uint64_t nignored;
   ldb_event_entry *events;
 } ldb_event_buffer_t;
@@ -65,10 +67,10 @@ typedef struct {
   pid_t id;
   char **fsbase;
   char *stackbase;
+  ldb_event_buffer_t *ebuf;
   struct timespec ts_wait;
   struct timespec ts_lock;
   struct timespec ts_scan;
-  ldb_event_buffer_t *ebuf;
 } ldb_thread_info_t;
 
 typedef struct {
@@ -112,7 +114,7 @@ inline __attribute__((always_inline)) void __time_delay_ns(uint64_t ns)
 inline __attribute__((always_inline)) char *get_fs_rbp() {
   char *rbp;
 
-  asm volatile ("movq %%fs:-8, %0 \n\t" : "=r"(rbp) :: "memory");
+  asm volatile ("movq %%fs:-280, %0 \n\t" : "=r"(rbp) :: "memory");
 
   return rbp;
 }
@@ -135,17 +137,17 @@ inline __attribute__((always_inline)) char *rdfsbase() {
 
 inline __attribute__((always_inline)) void setup_canary() {
   uint64_t tag = ((uint64_t)LDB_CANARY) << 32;
-  __asm volatile ("movq %0, %%fs:-24 \n\t" :: "r"(tag): "memory");
+  __asm volatile ("movq %0, %%fs:-216 \n\t" :: "r"(tag): "memory");
 }
 
 inline __attribute__((always_inline)) void register_thread_info(int idx) {
-  __asm volatile ("mov %0, %%fs:-32 \n\t" :: "r"(idx): "memory");
+  __asm volatile ("mov %0, %%fs:-208 \n\t" :: "r"(idx): "memory");
 }
 
 inline __attribute__((always_inline)) pid_t get_thread_info_idx() {
   int idx;
 
-  __asm volatile ("mov %%fs:-32, %0 \n\t" : "=r"(idx) :: "memory");
+  __asm volatile ("mov %%fs:-208, %0 \n\t" : "=r"(idx) :: "memory");
 
   return idx;
 }

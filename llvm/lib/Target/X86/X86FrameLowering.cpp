@@ -1671,21 +1671,22 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
   }
 
   // LDB: Custom sequence in prologue (update ngen and rbp)
-  // 1. Increment __ldb_ngen
-  // incq %fs:-16
-  BuildMI(MBB, MBBI, DL, TII.get(X86::INC64m))
-    .addReg(0).addImm(1)
-    .addReg(0).addImm(-16)
-    .addReg(X86::FS);
-
-  // 2. update ngen in the stack frame
-  // movq %fs:-16, %r11
+  // 1. Copy generation number
+  // movq %fs:-344, %r11
   BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64rm))
     .addReg(X86::R11)
     .addReg(0).addImm(1)
-    .addReg(0).addImm(-16)
+    .addReg(0).addImm(-344)
     .addReg(X86::FS);
 
+  // 2. Increment __ldb_ngen
+  // incq %fs:-344
+  BuildMI(MBB, MBBI, DL, TII.get(X86::INC64m))
+    .addReg(0).addImm(1)
+    .addReg(0).addImm(-344)
+    .addReg(X86::FS);
+
+  // 3. Put generation number into stack
   // movq %r11, 16(%rbp)
   BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mr))
     .addReg(X86::RBP).addImm(1)
@@ -1693,12 +1694,12 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
     .addReg(0)
     .addReg(X86::R11);
 
-  // 3.LDB: Set Tag
-  // movq %fs:-24, %r11
+  // 4.LDB: Install canary
+  // movq %fs:-216, %r11
   BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64rm))
     .addReg(X86::R11)
     .addReg(0).addImm(1)
-    .addReg(0).addImm(-24)
+    .addReg(0).addImm(-216)
     .addReg(X86::FS);
 
   // movq %r11, 8(%rbp)
@@ -1709,10 +1710,10 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
     .addReg(X86::R11);
 
   // 4. update __ldb_rbp
-  // movq %rbp, %fs:-8
+  // movq %rbp, %fs:-280
   BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mr))
     .addReg(0).addImm(1)
-    .addReg(0).addImm(-8)
+    .addReg(0).addImm(-280)
     .addReg(X86::FS)
     .addReg(X86::RBP);
 
@@ -2200,10 +2201,10 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
     --MBBI;
 
     // 1. Update rbp
-    // movq %rbp, %fs:-8
+    // movq %rbp, %fs:-280
     BuildMI(MBB, MBBI, DL, TII.get(X86::MOV64mr))
       .addReg(0).addImm(1)
-      .addReg(0).addImm(-8)
+      .addReg(0).addImm(-280)
       .addReg(X86::FS)
       .addReg(X86::RBP);
     --MBBI;

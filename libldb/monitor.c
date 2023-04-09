@@ -9,8 +9,8 @@ extern bool running;
 
 static inline bool is_stack_modified(char ***fsbase, char *slock,
     uint64_t slock2) {
-  return (*fsbase == NULL || slock != *(*fsbase - 1) ||
-        slock2 != *(uint64_t *)(*fsbase - 2));
+  return (*fsbase == NULL || slock != *(*fsbase - 35) ||
+        slock2 != *(uint64_t *)(*fsbase - 43));
 }
 
 void *monitor_main(void *arg) {
@@ -80,8 +80,8 @@ void *monitor_main(void *arg) {
       struct timespec now;
       uint64_t elapsed;
       int lidx = 0;
-      char *rbp = *(*fsbase - 1);
-      uint64_t slock2 = *(uint64_t *)(*fsbase - 2);
+      char *rbp = *(*fsbase - 35);
+      uint64_t slock2 = *(uint64_t *)(*fsbase - 43);
       char *prbp = rbp - 8;
       // use initial rbp as sequence lock
       char *slock = rbp;
