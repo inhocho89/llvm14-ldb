@@ -198,7 +198,7 @@ void *monitor_main(void *arg) {
 #if LDB_MONITOR_PERIOD > 0
     clock_get_now(&scan_finish);
     scan_delay = elapsed_ns(&scan_start, &scan_finish);
-    if (scan_delay < LDB_MONITOR_PERIOD) {
+    if (scan_delay < LDB_MONITOR_PERIOD * 1000) {
       __time_delay_ns(LDB_MONITOR_PERIOD * 1000 - scan_delay);
     }
 #endif
