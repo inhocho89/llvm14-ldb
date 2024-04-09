@@ -1,14 +1,20 @@
 from flask import Flask, render_template, request
 import os
 
-APP_DIR = "/home/inhocho/memcached-1.6.19-ldb/"
-APP_NAME = "memcached"
+APP_DIR = "/path/to/app/dir"
+APP_NAME = "app_name"
 
-app = Flask(__name__)
+def create_app():
+    app = Flask(__name__)
 
-@app.before_first_request
-def construct_index():
-    os.system("python3 construct_index.py {}".format(APP_DIR))
+    with app.app_context():
+        os.system("python3 construct_index.py {}".format(APP_DIR))
+
+    print("Staring web dashboard...")
+
+    return app
+
+app = create_app()
 
 @app.route('/')
 def index():
