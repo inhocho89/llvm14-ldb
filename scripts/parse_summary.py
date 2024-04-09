@@ -122,7 +122,12 @@ def decode_file_line(dwarfinfo, addresses):
             if prevstate:
                 addrs = [x for x in addresses if prevstate.address <= x < entry.state.address]
                 for addr in addrs:
+                    fe = lineprog['file_entry'][prevstate.file - offset]
+                    dir_path = b'.'
+                    if fe.dir_index > 0:
+                        dir_path = lineprog['include_directory'][fe.dir_index - 1]
                     ret[addr] = {'fname': lineprog['file_entry'][prevstate.file - offset].name,
+                            'dir': dir_path,
                             'line': prevstate.line,
                             'col': prevstate.column}
                     addresses.remove(addr)
@@ -157,6 +162,36 @@ def decode_dynamic(mapsinfo, addresses):
 
     return ret
 
+def extract_func_desc(line):
+    i = 0
+
+    while i < len(line) and line[i] != '(':
+        i += 1
+    i += 1
+    pending = 1
+    while pending > 0 and i < len(line):
+        if line[i] == ')':
+            pending -= 1
+        elif line[i] == '(':
+            pending += 1
+        i += 1
+
+    if pending == 0:
+        i -= 1
+    i = min(i, len(line) - 1)
+    return line[:i+1]
+
+def func_read(file_path, nline, ncol):
+    if not os.path.exists(file_path):
+        return "???"
+
+    with open(file_path, "r") as f:
+        for i, line in enumerate(f):
+            if i == nline - 1:
+                return extract_func_desc(line[ncol-1:])
+
+    return "???"
+
 def get_finfos(dwarfinfo, mapsinfo, addresses):
     # remove duplicates
     addresses = list(set(addresses))
@@ -175,8 +210,10 @@ def get_finfos(dwarfinfo, mapsinfo, addresses):
     ret = decode_file_line(dwarfinfo, addresses)
 
     for key in ret:
-        finfomap[key] = "{}:{:d}:{:d}"\
-                .format(bytes2str(ret[key]['fname']), ret[key]['line'], ret[key]['col'])
+        func_desc = func_read(bytes2str(ret[key]['dir']) + "/" + bytes2str(ret[key]['fname']),
+                ret[key]['line'], ret[key]['col'])
+        finfomap[key] = "{}:{:d}:{:d} ({})"\
+                .format(bytes2str(ret[key]['fname']), ret[key]['line'], ret[key]['col'], func_desc)
 
     # decode dynamic addresses
     ret = decode_dynamic(mapsinfo, addresses)
