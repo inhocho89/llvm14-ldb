@@ -1,4 +1,3 @@
-
 ROOT_PATH=../..
 CXX = $(ROOT_PATH)/build/bin/clang++
 LDXX = $(ROOT_PATH)/build/bin/clang++

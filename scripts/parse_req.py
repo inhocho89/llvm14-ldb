@@ -22,7 +22,7 @@ from elftools.common.py3compat import bytes2str
 from elftools.dwarf.descriptions import describe_form_class
 from elftools.elf.elffile import ELFFile
 
-EXTRA_WATCH = 100
+EXTRA_WATCH = 50
 
 LDB_DATA_FILENAME = "ldb.data"
 LDB_DATA_ORDERED_FILENAME = "ldb.data.ordered"
@@ -40,6 +40,8 @@ EVENT_MUTEX_LOCK = 7
 EVENT_MUTEX_UNLOCK = 8
 EVENT_JOIN_WAIT = 9
 EVENT_JOIN_JOINED = 10
+EVENT_THREAD_CREATE = 11
+EVENT_THREAD_EXIT = 12
 
 def parse_elf(executable):
     if not os.path.exists(executable):
@@ -259,6 +261,9 @@ def parse_ldb(executable, mreq):
                 arg1 = int.from_bytes(byte[16:24], "little")
                 arg2 = int.from_bytes(byte[24:32], "little")
                 arg3 = int.from_bytes(byte[32:40], "little")
+
+                if event_type < EVENT_STACK_SAMPLE or event_type > EVENT_THREAD_EXIT:
+                    continue
 
                 all_events.append({'tsc': timestamp_us,
                     'event_type': event_type,

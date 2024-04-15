@@ -39,6 +39,8 @@ EVENT_MUTEX_LOCK = 7
 EVENT_MUTEX_UNLOCK = 8
 EVENT_JOIN_WAIT = 9
 EVENT_JOIN_JOINED = 10
+EVENT_THREAD_CREATE = 11
+EVENT_THREAD_EXIT = 12
 
 def parse_elf(executable):
     if not os.path.exists(executable):
@@ -268,6 +270,9 @@ def parse_ldb(executable):
             arg2 = int.from_bytes(byte[24:32], "little")
             arg3 = int.from_bytes(byte[32:40], "little")
 
+            if event_type < EVENT_STACK_SAMPLE or event_type > EVENT_THREAD_EXIT:
+                continue
+
             if event_type == EVENT_STACK_SAMPLE:
                 latency_us = arg1 / 1000.0
                 pc = arg2
@@ -368,6 +373,13 @@ def parse_ldb(executable):
                 if tid in wait_lock_time:
                     wait_lock_time[tid][-1][2] = timestamp_us
 
+            elif event_type == EVENT_THREAD_CREATE:
+                my_events.append({'tsc': timestamp_us,
+                    'thread_idx': tid,
+                    'pc': 0,
+                    'event': "THREAD_CREATE",
+                    'detail': ""})
+
             # my event
             if min_tsc == 0 or min_tsc > timestamp_us:
                 min_tsc = timestamp_us
@@ -380,8 +392,10 @@ def parse_ldb(executable):
 
     my_events.sort(key=events_sort_tsc)
 
+    finfomap = {}
     # parse pcs
-    finfomap = get_finfos(dwarfinfo, mapsinfo, pcs)
+    if len(pcs) > 0:
+        finfomap = get_finfos(dwarfinfo, mapsinfo, pcs)
 
     # update event detail
     for e in my_events:
@@ -453,6 +467,8 @@ def parse_perf(thread_list, min_tsc, max_tsc):
 def generate_stats(executable):
     my_events, my_threads, wait_lock_time, min_tsc, max_tsc = parse_ldb(executable)
     sched_events = parse_perf(my_threads, min_tsc, max_tsc)
+
+    print(min_tsc, max_tsc)
 
     def events_sort_tsc(e):
         return e['tsc']

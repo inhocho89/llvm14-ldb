@@ -23,7 +23,7 @@ from elftools.common.py3compat import bytes2str
 from elftools.dwarf.descriptions import describe_form_class
 from elftools.elf.elffile import ELFFile
 
-EXTRA_WATCH = 100
+EXTRA_WATCH = 10
 
 LDB_DATA_FILENAME = "ldb.data"
 LDB_DATA_ORDERED_FILENAME = "ldb.data.ordered"
@@ -580,9 +580,9 @@ def parse_perf(thread_list, min_tsc, max_tsc):
                 'detail': "cpu_id={:d}, {}".format(cpu_id, bpf_output)})
     return row_in_time
 
-SVG_WIDTH = 1200
+SVG_WIDTH = 500
 #SVG_HEIGHT = 1200
-XMARKS = 8
+XMARKS = 4
 BAR_COLORS = ['rgb(216, 10, 44)',
         'rgb(241,38,27)',
         'rgb(226,116,36)',
@@ -612,7 +612,7 @@ def addBar(dwg, x, y, width, height, text, fill):
 
     if len(text) > 0:
         g.add(dwg.text(text,
-            insert=(x + 3,y + height - 3),
+            insert=(max(x + 3, 50),y + height - 3),
             font_size='12px',
             font_family='Courier New'))
 
@@ -656,10 +656,32 @@ def addGraph(dwg, offset, events, wait_lock_time, duration, thread_id, isMutexHo
 
     # draw function bars
     max_level = 0
+    if isMutexHolder:
+        max_level = 1
+
+        r = addBar(dwg,
+                   0,
+                   graph_height - 50 - 16,
+                   (SVG_WIDTH),
+                   15,
+                   "background_thread",
+                   BAR_COLORS[0])
+        r.fill (BAR_COLORS[0], opacity=0.5)
+
+    last_fline = None
+    
     for i in range(len(events)):
         le = events[i]
         start = le['tsc'] - le['latency_us']
         level = 0
+
+        if le['fline'] == last_fline:
+            continue
+
+        last_fline = le['fline']
+
+        if isMutexHolder:
+            level += 1
 
         for j in range(i):
             le_ = events[j]
@@ -709,19 +731,20 @@ def addGraph(dwg, offset, events, wait_lock_time, duration, thread_id, isMutexHo
             transform=pcRotate))
 
     # draw critical section
-    for (wait, lock, unlock) in wait_lock_time:
-        if lock == -1 and unlock == -1:
-            continue
-        lock_x = 0
-        unlock_x = 50 + (SVG_WIDTH-70)
-        if lock != -1:
-            lock_x = 50 + (SVG_WIDTH-70) * lock / duration
-        if unlock_x != -1:
-            unlock_x = 50 + (SVG_WIDTH-70) * unlock / duration
-        r = dwg.rect((lock_x, graph_height-50),
-                (unlock_x - lock_x, 10))
-        r.fill("red", opacity=0.2)
-        dwg.add(r)
+
+#    for (wait, lock, unlock) in wait_lock_time:
+#        if lock == -1 and unlock == -1:
+#            continue
+#        lock_x = 0
+#        unlock_x = 50 + (SVG_WIDTH-70)
+#        if lock != -1:
+#            lock_x = 50 + (SVG_WIDTH-70) * lock / duration
+#        if unlock_x != -1:
+#            unlock_x = 50 + (SVG_WIDTH-70) * unlock / duration
+#        r = dwg.rect((lock_x, graph_height-50),
+#                (unlock_x - lock_x, 10))
+#        r.fill("red", opacity=0.2)
+#        dwg.add(r)
 
         '''
         if wait != -1:
